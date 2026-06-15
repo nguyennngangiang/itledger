@@ -54,107 +54,141 @@ export function CreateDeviceModal({ onClose }: { onClose: () => void }) {
   }
 
   return (
-    <Modal title="Create Device" onClose={onClose}>
-      <form className="modal-form" onSubmit={handleSubmit}>
+  <Modal title="Create Device" onClose={onClose}>
+    <form className="device-form" onSubmit={handleSubmit}>
+      <div className="device-grid">
         <label>
-          Serial number
+          Serial Number *
           <input
             type="text"
             value={serialNumber}
             onChange={(e) => setSerialNumber(e.target.value)}
             required
+            placeholder="SN123456789"
           />
         </label>
+
         <label>
           Barcode
           <input
             type="text"
             value={barcode}
             onChange={(e) => setBarcode(e.target.value)}
+            placeholder="Barcode"
           />
         </label>
+
         <label>
-          Name
+          Device Name
           <input
             type="text"
             value={name}
             onChange={(e) => setName(e.target.value)}
+            placeholder="Dell Latitude 5420"
           />
         </label>
+
         <label>
           Type
           <input
             type="text"
             value={type}
             onChange={(e) => setType(e.target.value)}
+            placeholder="Laptop"
           />
         </label>
+
         <label>
           Brand
           <input
             type="text"
             value={brand}
             onChange={(e) => setBrand(e.target.value)}
+            placeholder="Dell"
           />
         </label>
+
         <label>
           CPU
           <input
             type="text"
             value={cpu}
             onChange={(e) => setCpu(e.target.value)}
+            placeholder="Intel Core i5"
           />
         </label>
+
         <label>
           RAM
           <input
             type="text"
             value={ram}
             onChange={(e) => setRam(e.target.value)}
+            placeholder="16 GB"
           />
         </label>
+
         <label>
           Storage
           <input
             type="text"
             value={storage}
             onChange={(e) => setStorage(e.target.value)}
+            placeholder="512 GB SSD"
           />
         </label>
+
         <label>
-          OS
+          Operating System
           <input
             type="text"
             value={os}
             onChange={(e) => setOs(e.target.value)}
+            placeholder="Windows 11"
           />
         </label>
+
         <label>
           MS Office
           <input
             type="text"
             value={msoffice}
             onChange={(e) => setMsoffice(e.target.value)}
+            placeholder="Office 365"
           />
         </label>
+
         <label>
-          Buy date
+          Buy Date
           <input
             type="date"
             value={buyDate}
             onChange={(e) => setBuyDate(e.target.value)}
           />
         </label>
-        {error && <p className="form-error">{error}</p>}
-        <div className="modal-actions">
-          <button type="button" onClick={onClose} disabled={submitting}>
-            Cancel
-          </button>
-          <button type="submit" disabled={submitting}>
-            {submitting ? 'Creating…' : 'Create'}
-          </button>
-        </div>
-      </form>
-    </Modal>
-  )
+      </div>
+
+      {error && <p className="form-error">{error}</p>}
+
+      <div className="device-actions">
+        <button
+          type="button"
+          className="cancel-btn"
+          onClick={onClose}
+          disabled={submitting}
+        >
+          Cancel
+        </button>
+
+        <button
+          type="submit"
+          className="create-btn"
+          disabled={submitting}
+        >
+          {submitting ? 'Creating...' : 'Create Device'}
+        </button>
+      </div>
+    </form>
+  </Modal>
+)
 }

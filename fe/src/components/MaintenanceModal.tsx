@@ -88,8 +88,9 @@ function MaintenanceModal({ onClose }: { onClose: () => void }) {
   }
 
   return (
-    <Modal title="Maintenance" onClose={onClose}>
-      <form className="modal-form" onSubmit={handleSubmit}>
+  <Modal title="Maintenance" onClose={onClose}>
+    <form className="modal-form maintenance-form" onSubmit={handleSubmit}>
+      <div className="maintenance-grid">
         <label>
           Device serial number
           <select
@@ -113,6 +114,7 @@ function MaintenanceModal({ onClose }: { onClose: () => void }) {
             ))}
           </select>
         </label>
+
         <label>
           Team
           <select
@@ -122,7 +124,11 @@ function MaintenanceModal({ onClose }: { onClose: () => void }) {
             disabled={loading || !!loadError || submitting}
           >
             <option value="">
-              {loading ? 'Loading teams…' : loadError ? 'Could not load teams' : 'Select a team'}
+              {loading
+                ? 'Loading teams…'
+                : loadError
+                  ? 'Could not load teams'
+                  : 'Select a team'}
             </option>
             {teams.map((team) => (
               <option key={team.team_id} value={team.team_id}>
@@ -132,6 +138,7 @@ function MaintenanceModal({ onClose }: { onClose: () => void }) {
             ))}
           </select>
         </label>
+
         <label>
           Part that needs to be repair
           <input
@@ -141,6 +148,7 @@ function MaintenanceModal({ onClose }: { onClose: () => void }) {
             disabled={submitting}
           />
         </label>
+
         <label>
           Description of the problem
           <input
@@ -150,6 +158,7 @@ function MaintenanceModal({ onClose }: { onClose: () => void }) {
             disabled={submitting}
           />
         </label>
+
         <label>
           Solution of the problem
           <input
@@ -159,6 +168,7 @@ function MaintenanceModal({ onClose }: { onClose: () => void }) {
             disabled={submitting}
           />
         </label>
+
         <label>
           Result of the repair
           <input
@@ -168,6 +178,7 @@ function MaintenanceModal({ onClose }: { onClose: () => void }) {
             disabled={submitting}
           />
         </label>
+
         <label>
           Cost of the repair
           <input
@@ -178,6 +189,7 @@ function MaintenanceModal({ onClose }: { onClose: () => void }) {
             disabled={submitting}
           />
         </label>
+
         <label>
           Remark
           <input
@@ -187,19 +199,32 @@ function MaintenanceModal({ onClose }: { onClose: () => void }) {
             disabled={submitting}
           />
         </label>
-        {loadError && <p className="form-error">{loadError}</p>}
-        {error && <p className="form-error">{error}</p>}
-        <div className="modal-actions">
-          <button type="button" onClick={onClose} disabled={submitting}>
-            Cancel
-          </button>
-          <button type="submit" disabled={loading || !!loadError || submitting}>
-            {submitting ? 'Submitting…' : 'Submit'}
-          </button>
-        </div>
-      </form>
-    </Modal>
-  )
+      </div>
+
+      {loadError && <p className="form-error">{loadError}</p>}
+      {error && <p className="form-error">{error}</p>}
+
+      <div className="modal-actions">
+        <button
+          className="cancel-btn"
+          type="button"
+          onClick={onClose}
+          disabled={submitting}
+        >
+          Cancel
+        </button>
+
+        <button
+          className="create-btn"
+          type="submit"
+          disabled={loading || !!loadError || submitting}
+        >
+          {submitting ? 'Submitting…' : 'Submit'}
+        </button>
+      </div>
+    </form>
+  </Modal>
+)
 }
 
 export default MaintenanceModal
