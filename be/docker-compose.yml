@@ -1,4 +1,4 @@
-# docker-compose.yml — Postgres only
+# docker-compose.yml
 services:
   db:
     image: postgres:16
@@ -11,6 +11,22 @@ services:
     volumes:
       - pgdata:/var/lib/postgresql/data
       - ./sql/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql
+
+  api:
+    image: python:3.12-slim
+    working_dir: /workspace
+    volumes:
+      - ..:/workspace
+    environment:
+      DATABASE_URL: postgresql://postgres:poop@db:5432/itledger
+      CORS_ORIGINS: http://localhost:5173
+    ports:
+      - "8000:8000"
+    depends_on:
+      - db
+    command: >
+      sh -c "pip install --no-cache-dir -r be/requirements.txt &&
+             uvicorn be.main:app --host 0.0.0.0 --port 8000 --reload"
 
 volumes:
   pgdata:
