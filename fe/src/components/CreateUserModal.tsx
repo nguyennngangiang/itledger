@@ -53,8 +53,9 @@ export function CreateUserModal({ onClose }: { onClose: () => void }) {
   }
 
   return (
-    <Modal title="Create User" onClose={onClose}>
-      <form className="modal-form" onSubmit={handleSubmit}>
+  <Modal title="Create User" onClose={onClose}>
+    <form className="modal-form user-form" onSubmit={handleSubmit}>
+      <div className="user-grid">
         <label>
           Employee code
           <input
@@ -63,8 +64,10 @@ export function CreateUserModal({ onClose }: { onClose: () => void }) {
             onChange={(e) => setEmployeeCode(e.target.value)}
             required
             disabled={submitting}
+            placeholder="VPHN000"
           />
         </label>
+
         <label>
           Name
           <input
@@ -73,9 +76,11 @@ export function CreateUserModal({ onClose }: { onClose: () => void }) {
             onChange={(e) => setName(e.target.value)}
             required
             disabled={submitting}
+            placeholder="Nguyen Van A"
           />
         </label>
-        <label>
+
+        <label className="user-team">
           Team
           <select
             value={team}
@@ -84,11 +89,12 @@ export function CreateUserModal({ onClose }: { onClose: () => void }) {
           >
             <option value="">
               {loadingTeams
-                ? 'Loading teams…'
+                ? 'Loading teams...'
                 : loadError
-                  ? 'Could not load teams'
-                  : 'Select a team (optional)'}
+                ? 'Could not load teams'
+                : 'Select a team (optional)'}
             </option>
+
             {teams.map((t) => (
               <option key={t.team_id} value={t.team_id}>
                 {t.team_id}
@@ -97,17 +103,30 @@ export function CreateUserModal({ onClose }: { onClose: () => void }) {
             ))}
           </select>
         </label>
-        {loadError && <p className="form-error">{loadError}</p>}
-        {error && <p className="form-error">{error}</p>}
-        <div className="modal-actions">
-          <button type="button" onClick={onClose} disabled={submitting}>
-            Cancel
-          </button>
-          <button type="submit" disabled={submitting || loadingTeams || !!loadError}>
-            {submitting ? 'Creating…' : 'Create'}
-          </button>
-        </div>
-      </form>
-    </Modal>
-  )
+      </div>
+
+      {loadError && <p className="form-error">{loadError}</p>}
+      {error && <p className="form-error">{error}</p>}
+
+      <div className="modal-actions">
+        <button
+          className="cancel-btn"
+          type="button"
+          onClick={onClose}
+          disabled={submitting}
+        >
+          Cancel
+        </button>
+
+        <button
+          className="create-btn"
+          type="submit"
+          disabled={submitting || loadingTeams || !!loadError}
+        >
+          {submitting ? 'Creating...' : 'Create'}
+        </button>
+      </div>
+    </form>
+  </Modal>
+)
 }

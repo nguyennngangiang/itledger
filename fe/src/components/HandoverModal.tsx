@@ -72,8 +72,9 @@ function HandoverModal({ onClose }: { onClose: () => void }) {
   }
 
   return (
-    <Modal title="Handover" onClose={onClose}>
-      <form className="modal-form" onSubmit={handleSubmit}>
+  <Modal title="Handover" onClose={onClose}>
+    <form className="modal-form handover-form" onSubmit={handleSubmit}>
+      <div className="handover-grid">
         <label>
           Device name
           <select
@@ -89,6 +90,7 @@ function HandoverModal({ onClose }: { onClose: () => void }) {
                   ? 'Could not load devices'
                   : 'Select a device'}
             </option>
+
             {devices.map((device) => (
               <option key={device.serial_number} value={device.serial_number}>
                 {device.name ?? device.serial_number}
@@ -97,6 +99,7 @@ function HandoverModal({ onClose }: { onClose: () => void }) {
             ))}
           </select>
         </label>
+
         <label>
           From employee
           <select
@@ -112,6 +115,7 @@ function HandoverModal({ onClose }: { onClose: () => void }) {
                   ? 'Could not load users'
                   : 'Select an employee'}
             </option>
+
             {users.map((user) => (
               <option key={user.employee_code} value={user.employee_code}>
                 {user.employee_code}
@@ -120,6 +124,7 @@ function HandoverModal({ onClose }: { onClose: () => void }) {
             ))}
           </select>
         </label>
+
         <label>
           To employee
           <select
@@ -135,6 +140,7 @@ function HandoverModal({ onClose }: { onClose: () => void }) {
                   ? 'Could not load users'
                   : 'Select an employee'}
             </option>
+
             {users.map((user) => (
               <option key={user.employee_code} value={user.employee_code}>
                 {user.employee_code}
@@ -143,28 +149,43 @@ function HandoverModal({ onClose }: { onClose: () => void }) {
             ))}
           </select>
         </label>
-        <label>
+
+        <label className="handover-reason">
           Reason
           <input
             type="text"
             value={reason}
             onChange={(e) => setReason(e.target.value)}
             disabled={submitting}
+            placeholder="Optional"
           />
         </label>
-        {loadError && <p className="form-error">{loadError}</p>}
-        {error && <p className="form-error">{error}</p>}
-        <div className="modal-actions">
-          <button type="button" onClick={onClose} disabled={submitting}>
-            Cancel
-          </button>
-          <button type="submit" disabled={loading || !!loadError || submitting}>
-            {submitting ? 'Submitting…' : 'Submit'}
-          </button>
-        </div>
-      </form>
-    </Modal>
-  )
+      </div>
+
+      {loadError && <p className="form-error">{loadError}</p>}
+      {error && <p className="form-error">{error}</p>}
+
+      <div className="modal-actions">
+        <button
+          className="cancel-btn"
+          type="button"
+          onClick={onClose}
+          disabled={submitting}
+        >
+          Cancel
+        </button>
+
+        <button
+          className="create-btn"
+          type="submit"
+          disabled={loading || !!loadError || submitting}
+        >
+          {submitting ? 'Submitting…' : 'Submit'}
+        </button>
+      </div>
+    </form>
+  </Modal>
+)
 }
 
 export default HandoverModal
