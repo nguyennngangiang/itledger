@@ -13,7 +13,7 @@ COLUMNS = (
     "serial_number, barcode, type, brand, cpu, ram, storage, "
     "os, msoffice, buy_date, name, user_id"
 )
-
+ 
 
 async def create(pool: asyncpg.Pool, device: DeviceCreate) -> dict:
     try:

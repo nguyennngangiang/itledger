@@ -1,4 +1,4 @@
-"""Team schemas. Field names match the snake_case columns in sql/schema.sql."""
+"""Team schemas"""
 from pydantic import BaseModel
 
 

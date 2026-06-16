@@ -1,6 +1,4 @@
-"""Handover schemas. Field names match the snake_case columns in sql/schema.sql,
-so a DB row (asyncpg Record -> dict) maps straight onto these models.
-"""
+"""Handover schemas"""
 from datetime import date
 
 from pydantic import BaseModel
