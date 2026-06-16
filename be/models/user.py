@@ -1,6 +1,4 @@
-"""User schemas. Field names match the snake_case columns in sql/schema.sql,
-so a DB row (asyncpg Record -> dict) maps straight onto these models.
-"""
+"""User schemas"""
 from pydantic import BaseModel
 
 
