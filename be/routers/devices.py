@@ -22,6 +22,15 @@ async def create_device(device: DeviceCreate, pool=Depends(get_pool)):
     except ForeignKeyError as e:
         raise HTTPException(409, str(e))
 
+@router.post("/batch", response_model=list[DeviceOut], status_code=201)
+async def create_device_batch(devices: list[DeviceCreate], pool=Depends(get_pool)):
+    try:
+        return await repo.create_batch(pool, devices)
+    except DuplicateError as e:
+        raise HTTPException(409, str(e))
+    except ForeignKeyError as e:
+        raise HTTPException(409, str(e))
+
 
 @router.get("", response_model=list[DeviceOut])
 async def list_devices(user_id: str | None = None, pool=Depends(get_pool)):

@@ -1,4 +1,6 @@
 # docker-compose.yml
+name: itledger
+
 services:
   db:
     image: postgres:16
