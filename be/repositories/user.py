@@ -6,6 +6,22 @@ from .errors import DuplicateError, ForeignKeyError
 
 COLUMNS = "employee_code, name, team"
 
+async def create_batch(pool: asyncpg.Pool, users: list[UserCreate]) -> list[dict]:
+    try:
+        rows = []
+        for user in users:
+            row = await pool.fetchrow(
+                f"""INSERT INTO users ({COLUMNS})
+                    VALUES ($1,$2,$3)
+                    RETURNING {COLUMNS}""",
+                user.employee_code, user.name, user.team,
+            )
+            rows.append(dict(row))
+        return rows
+    except asyncpg.UniqueViolationError as e:
+        raise DuplicateError(f"User already exists: {user.employee_code}") from e
+    except asyncpg.ForeignKeyViolationError as e:
+        raise ForeignKeyError(f"Unknown team: {user.team}") from e
 
 async def create(pool: asyncpg.Pool, user: UserCreate) -> dict:
     try:
