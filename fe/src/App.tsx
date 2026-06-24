@@ -1,99 +1,111 @@
-import './App.css'
+import "./App.css";
 
-import { useEffect, useState } from 'react'
-import MaintenanceModal from './components/MaintenanceModal'
-import HandoverModal from './components/HandoverModal'
-import { CreateDeviceModal } from './components/CreateDeviceModal'
-import { CreateUserModal } from './components/CreateUserModal'
-import TableList from './components/TableList'
+import { useEffect, useState } from "react";
+import loadingGif from "./assets/loading.gif";
+import { useLoading } from "./hook/LoadingContext";
+// import "bootstrap/dist/css/bootstrap.min.css";
+// import MaintenanceModal from "./components/MaintenanceModal";
+// import HandoverModal from "./components/HandoverModal";
+// import { CreateDeviceModal } from "./components/CreateDeviceModal";
+// import { CreateUserModal } from "./components/CreateUserModal";
+import { DeviceMainScreen } from "./components/DeviceMainScreen";
+// import TableList from "./components/TableList";
 
-import { listDevices } from './api/devices'
-import { listUsers } from './api/users'
-import { listHandovers } from './api/handovers'
+// import { listDevices } from "./api/devices";
+// import { listUsers } from "./api/users";
+// import { listHandovers } from "./api/handovers";
 
-import type { Device, User, Handover } from './types'
+// import type { Device, User, Handover } from "./types";
 
-type ActiveModal = 'maintenance' | 'handover' | 'device' | 'user' | null
+type ActiveMenu = "maintenance" | "handover" | "device" | "user" | null;
 
 function App() {
-  const [activeModal, setActiveModal] = useState<ActiveModal>(null)
-  const [devices, setDevices] = useState<Device[]>([])
-  const [users, setUsers] = useState<User[]>([])
-  const [handovers, setHandovers] = useState<Handover[]>([])
+  const [activeMenu, setActiveMenu] = useState<ActiveMenu>(null);
+  const { loading } = useLoading();
+  console.log("loading", loading);
+  // const [devices, setDevices] = useState<Device[]>([]);
+  // const [users, setUsers] = useState<User[]>([]);
+  // const [handovers, setHandovers] = useState<Handover[]>([]);
 
-  const loadData = async () => {
-    try {
-      const [deviceList, userList, handoverList] = await Promise.all([
-        listDevices(),
-        listUsers(),
-        listHandovers(),
-      ])
-      setDevices(deviceList)
-      setUsers(userList)
-      setHandovers(handoverList)
-    } catch (err) {
-      console.error(err)
-    }
-  }
+  // const loadData = async () => {
+  //   try {
+  //     const [deviceList, userList, handoverList] = await Promise.all([
+  //       listDevices(),
+  //       listUsers(),
+  //       listHandovers(),
+  //     ]);
+  //     setDevices(deviceList);
+  //     setUsers(userList);
+  //     setHandovers(handoverList);
+  //   } catch (err) {
+  //     console.error(err);
+  //   }
+  // };
 
-  useEffect(() => {
-    loadData()
-  }, [])
+  // useEffect(() => {
+  //   loadData();
+  // }, []);
 
-  const closeModal = async () => {
-    setActiveModal(null)
-    await loadData()
-  }
+  // const closeModal = async () => {
+  //   setActiveMenu(null);
+  //   await loadData();
+  // };
 
   return (
     <>
+      {loading && (
+        <div className="device-loading-overlay">
+          <img
+            src={loadingGif}
+            alt="Loading devices…"
+            style={{ width: "200px", height: "200px" }}
+          />
+        </div>
+      )}
       <div className="app-layout">
         <div className="sidebar">
           <div className="sidebar-menu">
             <h2 className="sidebar-title">IT Ledger</h2>
             <button
               className="menu-button"
-              onClick={() => setActiveModal('device')}
+              onClick={() => setActiveMenu("device")}
             >
-              💻 Create Device
+              💻 Device
             </button>
             <button
               className="menu-button"
-              onClick={() => setActiveModal('user')}
+              onClick={() => setActiveMenu("user")}
             >
               👤 Create User
             </button>
             <button
               className="menu-button"
-              onClick={() => setActiveModal('maintenance')}
+              onClick={() => setActiveMenu("maintenance")}
             >
               🔧 Maintenance
             </button>
             <button
               className="menu-button"
-              onClick={() => setActiveModal('handover')}
+              onClick={() => setActiveMenu("handover")}
             >
               🔄 Handover
             </button>
           </div>
         </div>
-        <TableList devices={devices} handovers={handovers} users={users} />
+        <div className="main-content">
+          {activeMenu === "device" && <DeviceMainScreen />}
+        </div>
+        {/* <TableList devices={devices} handovers={handovers} users={users} /> */}
       </div>
 
-      {activeModal === 'maintenance' && (
+      {/* {activeMenu === "maintenance" && (
         <MaintenanceModal onClose={closeModal} />
       )}
-      {activeModal === 'handover' && (
-        <HandoverModal onClose={closeModal} />
-      )}
-      {activeModal === 'device' && (
-        <CreateDeviceModal onClose={closeModal} />
-      )}
-      {activeModal === 'user' && (
-        <CreateUserModal onClose={closeModal} />
-      )}
+      {activeMenu === "handover" && <HandoverModal onClose={closeModal} />}
+      {activeMenu === "device" && <CreateDeviceModal onClose={closeModal} />}
+      {activeMenu === "user" && <CreateUserModal onClose={closeModal} />} */}
     </>
-  )
+  );
 }
 
-export default App
+export default App;
