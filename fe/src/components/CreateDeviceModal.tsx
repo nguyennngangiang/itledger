@@ -247,7 +247,7 @@ export function CreateDeviceModal({ onClose }: { onClose: () => void }) {
 
         {error && <p className="form-error">{error}</p>}
 
-        <div className="device-actions">
+        <div className="modal-actions">
           <button
             type="button"
             className="cancel-btn"
