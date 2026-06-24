@@ -18,7 +18,6 @@ async def create_batch(pool: asyncpg.Pool, devices: list[DeviceCreate]) -> list[
     try:
         rows = []
         for device in devices:
-            print(device)
             row = await pool.fetchrow(
                 f"""INSERT INTO devices ({COLUMNS})
                     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)

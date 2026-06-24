@@ -22,6 +22,14 @@ async def create_user(user: UserCreate, pool=Depends(get_pool)):
     except ForeignKeyError as e:
         raise HTTPException(409, str(e))
 
+@router.post("/batch", response_model=list[UserOut], status_code=201)
+async def create_user_batch(users: list[UserCreate], pool=Depends(get_pool)):
+    try:
+        return await repo.create_batch(pool, users)
+    except DuplicateError as e:
+        raise HTTPException(409, str(e))
+    except ForeignKeyError as e:
+        raise HTTPException(409, str(e))
 
 @router.get("", response_model=list[UserOut])
 async def list_users(team: str | None = None, pool=Depends(get_pool)):
