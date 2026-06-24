@@ -100,3 +100,26 @@ async def delete(pool: asyncpg.Pool, serial_number: str) -> bool:
     )
     # asyncpg returns the command tag, e.g. "DELETE 1" / "DELETE 0".
     return result != "DELETE 0"
+
+
+async def search(pool: asyncpg.Pool, q: str) -> list[dict]:
+    rows = await pool.fetch(
+        f"SELECT {COLUMNS} FROM devices WHERE serial_number LIKE $1 OR name LIKE $1",
+        f"%{q}%",
+    )
+    return [dict(r) for r in rows]
+
+FILTERABLE_FIELDS = frozenset({
+    "type", "brand", "cpu", "ram", "storage", "os", "msoffice", "user_id"
+})
+
+
+async def filter_devices(pool: asyncpg.Pool, field: str, value: str) -> list[dict]:
+    """Filter devices by a single column. Column name is allowlisted — not user SQL."""
+    if field not in FILTERABLE_FIELDS:
+        raise ValueError(f"Unsupported filter field: {field}")
+    rows = await pool.fetch(
+        f"SELECT {COLUMNS} FROM devices WHERE {field} = $1 ORDER BY serial_number",
+        value,
+    )
+    return [dict(r) for r in rows]

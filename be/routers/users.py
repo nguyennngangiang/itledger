@@ -36,6 +36,11 @@ async def list_users(team: str | None = None, pool=Depends(get_pool)):
     return await repo.list_users(pool, team)
 
 
+@router.get("/search", response_model=list[UserOut])
+async def search_users(q: str, pool=Depends(get_pool)):
+    return await repo.search(pool, q)
+
+
 @router.get("/{employee_code}", response_model=UserOut)
 async def get_user(employee_code: str, pool=Depends(get_pool)):
     user = await repo.get(pool, employee_code)

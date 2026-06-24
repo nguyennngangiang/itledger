@@ -3,7 +3,7 @@
 Parse the request, call the repository, translate domain errors / missing rows
 to HTTP status codes. No SQL here — that lives in repositories/device.py.
 """
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 
 from ..db import get_pool
 from ..models.device import DeviceCreate, DeviceOut, DeviceUpdate
@@ -36,6 +36,13 @@ async def create_device_batch(devices: list[DeviceCreate], pool=Depends(get_pool
 async def list_devices(user_id: str | None = None, pool=Depends(get_pool)):
     return await repo.list_devices(pool, user_id)
 
+@router.get("/search", response_model=list[DeviceOut])
+async def search_devices(q: str, pool=Depends(get_pool)):
+    return await repo.search(pool, q)
+
+@router.get("/filter", response_model=list[DeviceOut])
+async def filter_devices(field: str, value: str, pool=Depends(get_pool)):
+    return await repo.filter_devices(pool, field, value)
 
 @router.get("/{serial_number}", response_model=DeviceOut)
 async def get_device(serial_number: str, pool=Depends(get_pool)):
@@ -64,3 +71,6 @@ async def update_device(
 async def delete_device(serial_number: str, pool=Depends(get_pool)):
     if not await repo.delete(pool, serial_number):
         raise HTTPException(404, f"Device not found: {serial_number}")
+
+
+
