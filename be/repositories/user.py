@@ -77,8 +77,12 @@ async def delete(pool: asyncpg.Pool, employee_code: str) -> bool:
     return result != "DELETE 0"
 
 async def search(pool: asyncpg.Pool, q: str) -> list[dict]:
+    pattern = f"%{q}%"
     rows = await pool.fetch(
-        f"SELECT {COLUMNS} FROM users WHERE employee_code LIKE $1 OR name LIKE $1 OR team LIKE $1",
-        f"%{q}%",
+        f"""SELECT {COLUMNS} FROM users
+            WHERE employee_code ILIKE $1
+               OR unaccent(name) ILIKE unaccent($1)
+               OR unaccent(team) ILIKE unaccent($1)""",
+        pattern,
     )
     return [dict(r) for r in rows]

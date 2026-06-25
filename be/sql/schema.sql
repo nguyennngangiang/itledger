@@ -1,3 +1,5 @@
+CREATE EXTENSION IF NOT EXISTS unaccent;
+
 CREATE TABLE users (
     employee_code VARCHAR(100) PRIMARY KEY,
     name VARCHAR(100),
