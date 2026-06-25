@@ -3,7 +3,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from . import db
 from .config import settings
-from .routers import devices, handovers, maintenance, teams, users
+from .routers import devices, handovers, maintenance, users
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -24,7 +24,6 @@ app.add_middleware(
 app.include_router(devices.router)
 app.include_router(handovers.router)
 app.include_router(maintenance.router)
-app.include_router(teams.router)
 app.include_router(users.router)
 
 

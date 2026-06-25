@@ -1,13 +1,7 @@
-CREATE TABLE teams (
-    team_id VARCHAR(100) PRIMARY KEY,
-    team_name VARCHAR(200),
-    division VARCHAR(200)
-);
-
 CREATE TABLE users (
     employee_code VARCHAR(100) PRIMARY KEY,
     name VARCHAR(100),
-    team VARCHAR(100) REFERENCES teams(team_id)
+    team VARCHAR(100)
 );
 
 CREATE TABLE devices (
@@ -38,7 +32,7 @@ CREATE TABLE maintenance (
     maintenance_id VARCHAR(100) PRIMARY KEY,
     maintenance_date DATE,
     device_id VARCHAR(100) REFERENCES devices(serial_number),
-    team VARCHAR(100) REFERENCES teams(team_id),
+    team VARCHAR(100),
     part VARCHAR(200),
     reason VARCHAR(500),
     solution VARCHAR(500),

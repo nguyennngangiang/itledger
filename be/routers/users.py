@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from ..db import get_pool
 from ..models.user import UserCreate, UserOut, UserUpdate
 from ..repositories import user as repo
-from ..repositories.errors import DuplicateError, ForeignKeyError
+from ..repositories.errors import DuplicateError
 
 router = APIRouter(prefix="/users", tags=["users"])
 
@@ -19,16 +19,12 @@ async def create_user(user: UserCreate, pool=Depends(get_pool)):
         return await repo.create(pool, user)
     except DuplicateError as e:
         raise HTTPException(409, str(e))
-    except ForeignKeyError as e:
-        raise HTTPException(409, str(e))
 
 @router.post("/batch", response_model=list[UserOut], status_code=201)
 async def create_user_batch(users: list[UserCreate], pool=Depends(get_pool)):
     try:
         return await repo.create_batch(pool, users)
     except DuplicateError as e:
-        raise HTTPException(409, str(e))
-    except ForeignKeyError as e:
         raise HTTPException(409, str(e))
 
 @router.get("", response_model=list[UserOut])
@@ -53,10 +49,7 @@ async def get_user(employee_code: str, pool=Depends(get_pool)):
 async def update_user(
     employee_code: str, user: UserUpdate, pool=Depends(get_pool)
 ):
-    try:
-        updated = await repo.update(pool, employee_code, user)
-    except ForeignKeyError as e:
-        raise HTTPException(409, str(e))
+    updated = await repo.update(pool, employee_code, user)
     if updated is None:
         raise HTTPException(404, f"User not found: {employee_code}")
     return updated
