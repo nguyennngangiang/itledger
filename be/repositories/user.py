@@ -2,7 +2,7 @@
 import asyncpg
 
 from ..models.user import UserCreate, UserUpdate
-from .errors import DuplicateError, ForeignKeyError
+from .errors import DuplicateError
 
 COLUMNS = "employee_code, name, team"
 
@@ -20,8 +20,6 @@ async def create_batch(pool: asyncpg.Pool, users: list[UserCreate]) -> list[dict
         return rows
     except asyncpg.UniqueViolationError as e:
         raise DuplicateError(f"User already exists: {user.employee_code}") from e
-    except asyncpg.ForeignKeyViolationError as e:
-        raise ForeignKeyError(f"Unknown team: {user.team}") from e
 
 async def create(pool: asyncpg.Pool, user: UserCreate) -> dict:
     try:
@@ -33,8 +31,6 @@ async def create(pool: asyncpg.Pool, user: UserCreate) -> dict:
         )
     except asyncpg.UniqueViolationError as e:
         raise DuplicateError(f"User already exists: {user.employee_code}") from e
-    # except asyncpg.ForeignKeyViolationError as e:
-    #     raise ForeignKeyError(f"Unknown team: {user.team}") from e
     return dict(row)
 
 
@@ -65,15 +61,12 @@ async def update(
 
     cols = list(fields.keys())
     set_clause = ", ".join(f"{c} = ${i + 1}" for i, c in enumerate(cols))
-    try:
-        row = await pool.fetchrow(
-            f"""UPDATE users SET {set_clause}
-                WHERE employee_code = ${len(cols) + 1}
-                RETURNING {COLUMNS}""",
-            *fields.values(), employee_code,
-        )
-    except asyncpg.ForeignKeyViolationError as e:
-        raise ForeignKeyError(f"Unknown team: {fields.get('team')}") from e
+    row = await pool.fetchrow(
+        f"""UPDATE users SET {set_clause}
+            WHERE employee_code = ${len(cols) + 1}
+            RETURNING {COLUMNS}""",
+        *fields.values(), employee_code,
+    )
     return dict(row) if row else None
 
 

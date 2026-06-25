@@ -36,8 +36,7 @@ async def create(pool: asyncpg.Pool, maintenance: MaintenanceCreate) -> dict:
         ) from e
     except asyncpg.ForeignKeyViolationError as e:
         raise ForeignKeyError(
-            f"Unknown device_id or team: "
-            f"{maintenance.device_id}, {maintenance.team}"
+            f"Unknown device_id: {maintenance.device_id}"
         ) from e
     return dict(row)
 
@@ -92,8 +91,7 @@ async def update(
         )
     except asyncpg.ForeignKeyViolationError as e:
         raise ForeignKeyError(
-            f"Unknown device_id or team: "
-            f"{fields.get('device_id')}, {fields.get('team')}"
+            f"Unknown device_id: {fields.get('device_id')}"
         ) from e
     return dict(row) if row else None
 
