@@ -1,7 +1,7 @@
 import { useState } from "react";
-import { createDevice } from "../api/devices";
-import { ApiError } from "../api/client";
-import type { DeviceCreate } from "../types";
+import { createDevice } from "../../api/devices";
+import { ApiError } from "../../api/client";
+import type { DeviceCreate } from "../../types";
 import { Modal } from "./Modal";
 
 function emptyToNull(value: string): string | null {
