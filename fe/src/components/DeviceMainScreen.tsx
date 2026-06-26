@@ -1,7 +1,6 @@
 import { useState, useEffect } from "react";
 import { listDevices } from "../api/devices";
 import type { Device } from "../types";
-import { Row, Card } from "react-bootstrap";
 import { useLoading } from "../hook/LoadingContext";
 
 export const DeviceMainScreen = () => {
@@ -18,7 +17,7 @@ export const DeviceMainScreen = () => {
     } finally {
       setTimeout(() => {
         endLoading();
-      }, 1000); // Add a delay of 500 milliseconds
+      }, 1000);
     }
   };
 
@@ -30,9 +29,9 @@ export const DeviceMainScreen = () => {
 
   return (
     <>
-      <Card>
-        <Row className="menu-title">Device List</Row>
-        <Card.Body className="device-table-container">
+      <div>
+        <div className="menu-title">Device List</div>
+        <div className="device-table-container">
           <table className="device-table">
             <thead>
               <tr>
@@ -65,8 +64,8 @@ export const DeviceMainScreen = () => {
               })}
             </tbody>
           </table>
-        </Card.Body>
-      </Card>
+        </div>
+      </div>
     </>
   );
 };
