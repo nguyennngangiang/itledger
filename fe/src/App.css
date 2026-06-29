@@ -1,3 +1,4 @@
+@import "tailwindcss";
 .app-layout {
   display: flex;
   height: 100vh;
@@ -63,11 +64,14 @@
 .device-table-container {
   overflow: auto;
   height: calc(100vh - 80px);
+  padding-left: 9px;
+  padding-right: 9px;
 }
 
 .device-table {
   border-collapse: collapse;
-  min-width: 1800px;
+  width: 80vw;
+  table-layout: auto;
 }
 
 .device-table th,
@@ -226,6 +230,7 @@
 
   margin-top: 36px;
   padding-top: 20px;
+  padding-bottom: 10px;
 
   border-top: 1px solid var(--border);
 }
