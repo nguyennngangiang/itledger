@@ -6,7 +6,7 @@ to HTTP status codes. No SQL here — that lives in repositories/device.py.
 from fastapi import APIRouter, Depends, HTTPException, Request
 
 from ..db import get_pool
-from ..models.device import DeviceCreate, DeviceOut, DeviceUpdate
+from ..models.device import DeviceCreate, DeviceOut, DeviceUpdate, DeviceDelete
 from ..repositories import device as repo
 from ..repositories.errors import DuplicateError, ForeignKeyError
 
@@ -67,10 +67,16 @@ async def update_device(
     return updated
 
 
-@router.delete("/{serial_number}", status_code=204)
-async def delete_device(serial_number: str, pool=Depends(get_pool)):
-    if not await repo.delete(pool, serial_number):
-        raise HTTPException(404, f"Device not found: {serial_number}")
+@router.delete("", status_code=204)
+async def delete_device(device: DeviceDelete, pool=Depends(get_pool)):
+    if not await repo.delete(pool, device.serial_number):
+        raise HTTPException(404, f"Device not found: {device.serial_number}")
+
+@router.delete("/batch", status_code=204)
+async def delete_device_batch(devices: list[DeviceDelete], pool=Depends(get_pool)):
+    for device in devices:
+        if not await repo.delete(pool, device.serial_number):
+            raise HTTPException(404, f"Device not found: {serial_number}")
 
 
 

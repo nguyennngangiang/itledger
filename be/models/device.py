@@ -28,3 +28,6 @@ class DeviceUpdate(DeviceBase):
 
 class DeviceOut(DeviceCreate):
     pass
+
+class DeviceDelete(BaseModel):
+    serial_number: str

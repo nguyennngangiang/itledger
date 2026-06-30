@@ -6,7 +6,7 @@ to HTTP status codes. No SQL here — that lives in repositories/user.py.
 from fastapi import APIRouter, Depends, HTTPException
 
 from ..db import get_pool
-from ..models.user import UserCreate, UserOut, UserUpdate
+from ..models.user import UserCreate, UserOut, UserUpdate, UserDelete
 from ..repositories import user as repo
 from ..repositories.errors import DuplicateError
 
@@ -55,7 +55,14 @@ async def update_user(
     return updated
 
 
-@router.delete("/{employee_code}", status_code=204)
-async def delete_user(employee_code: str, pool=Depends(get_pool)):
-    if not await repo.delete(pool, employee_code):
-        raise HTTPException(404, f"User not found: {employee_code}")
+@router.delete("", status_code=204)
+async def delete_user(user: UserDelete, pool=Depends(get_pool)):
+    if not await repo.delete(pool, user.employee_code):
+        raise HTTPException(404, f"Device not found: {user.employee_code}")
+
+@router.delete("/batch", status_code=204)
+async def delete_user_batch(users: list[UserDelete], pool=Depends(get_pool)):
+    for user in users:
+        if not await repo.delete(pool, user.employee_code):
+            raise HTTPException(404, f"User not found: {user.employee_code}")
+
