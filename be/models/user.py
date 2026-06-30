@@ -17,3 +17,6 @@ class UserUpdate(UserBase):
 
 class UserOut(UserCreate):
     pass
+
+class UserDelete(BaseModel):
+    employee_code: str
