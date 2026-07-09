@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Button, Input } from "antd";
 import { createDevice } from "../../api/devices";
 import { ApiError } from "../../api/client";
 import type { DeviceCreate } from "../../types";
@@ -9,23 +10,45 @@ function emptyToNull(value: string): string | null {
   return trimmed === "" ? null : trimmed;
 }
 
+const FIELDS: {
+  key: keyof typeof INITIAL;
+  label: string;
+  placeholder?: string;
+  required?: boolean;
+  type?: string;
+  full?: boolean;
+}[] = [
+  { key: "serial_number", label: "Serial Number", placeholder: "SN123456789", required: true },
+  { key: "barcode", label: "Barcode", placeholder: "8239498234" },
+  { key: "name", label: "Device Name", placeholder: "Dell Latitude 5420" },
+  { key: "type", label: "Type", placeholder: "Laptop" },
+  { key: "brand", label: "Brand", placeholder: "Dell" },
+  { key: "cpu", label: "CPU", placeholder: "Intel Core i5" },
+  { key: "ram", label: "RAM", placeholder: "16 GB" },
+  { key: "storage", label: "Storage", placeholder: "512 GB SSD" },
+  { key: "os", label: "Operating System", placeholder: "Windows 11" },
+  { key: "msoffice", label: "MS Office", placeholder: "Office 365" },
+  { key: "buy_date", label: "Buy Date", type: "date", full: true },
+];
+
+const INITIAL = {
+  serial_number: "",
+  barcode: "",
+  type: "",
+  brand: "",
+  cpu: "",
+  ram: "",
+  storage: "",
+  os: "",
+  msoffice: "",
+  buy_date: "",
+  name: "",
+};
+
 export function CreateDeviceModal({ onClose }: { onClose: () => void }) {
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
-
-  const [deviceData, setDeviceData] = useState({
-    serial_number: "",
-    barcode: "",
-    type: "",
-    brand: "",
-    cpu: "",
-    ram: "",
-    storage: "",
-    os: "",
-    msoffice: "",
-    buy_date: "",
-    name: "",
-  });
+  const [deviceData, setDeviceData] = useState({ ...INITIAL });
 
   const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -60,206 +83,43 @@ export function CreateDeviceModal({ onClose }: { onClose: () => void }) {
     }
   };
 
-  const handleInputChange = (field: keyof DeviceCreate, value: string) => {
+  const handleInputChange = (field: keyof typeof INITIAL, value: string) => {
     setDeviceData((prev) => ({ ...prev, [field]: value }));
   };
-  console.log("Device data:", deviceData); // Debugging log to check the device data being submitted
+
   return (
     <Modal title="Create Device" onClose={onClose}>
-      <form className="device-form" onSubmit={handleSubmit}>
-        <div className="device-grid">
-          <label>
-            Serial Number *
-            <input
-              type="text"
-              name="serial_number"
-              value={deviceData.serial_number}
-              onChange={(e) =>
-                handleInputChange(
-                  e.target.name as keyof DeviceCreate,
-                  e.target.value,
-                )
-              }
-              required
-              placeholder="SN123456789"
-            />
-          </label>
-
-          <label>
-            Barcode
-            <input
-              type="text"
-              name="barcode"
-              value={deviceData.barcode}
-              onChange={(e) =>
-                handleInputChange(
-                  e.target.name as keyof DeviceCreate,
-                  e.target.value,
-                )
-              }
-              placeholder="Barcode"
-            />
-          </label>
-
-          <label>
-            Device Name
-            <input
-              type="text"
-              name="name"
-              value={deviceData.name}
-              onChange={(e) =>
-                handleInputChange(
-                  e.target.name as keyof DeviceCreate,
-                  e.target.value,
-                )
-              }
-              placeholder="Dell Latitude 5420"
-            />
-          </label>
-
-          <label>
-            Type
-            <input
-              type="text"
-              name="type"
-              value={deviceData.type}
-              onChange={(e) =>
-                handleInputChange(
-                  e.target.name as keyof DeviceCreate,
-                  e.target.value,
-                )
-              }
-              placeholder="Laptop"
-            />
-          </label>
-
-          <label>
-            Brand
-            <input
-              type="text"
-              name="brand"
-              value={deviceData.brand}
-              onChange={(e) =>
-                handleInputChange(
-                  e.target.name as keyof DeviceCreate,
-                  e.target.value,
-                )
-              }
-              placeholder="Dell"
-            />
-          </label>
-
-          <label>
-            CPU
-            <input
-              type="text"
-              name="cpu"
-              value={deviceData.cpu}
-              onChange={(e) =>
-                handleInputChange(
-                  e.target.name as keyof DeviceCreate,
-                  e.target.value,
-                )
-              }
-              placeholder="Intel Core i5"
-            />
-          </label>
-
-          <label>
-            RAM
-            <input
-              type="text"
-              name="ram"
-              value={deviceData.ram}
-              onChange={(e) =>
-                handleInputChange(
-                  e.target.name as keyof DeviceCreate,
-                  e.target.value,
-                )
-              }
-              placeholder="16 GB"
-            />
-          </label>
-
-          <label>
-            Storage
-            <input
-              type="text"
-              name="storage"
-              value={deviceData.storage}
-              onChange={(e) =>
-                handleInputChange(
-                  e.target.name as keyof DeviceCreate,
-                  e.target.value,
-                )
-              }
-              placeholder="512 GB SSD"
-            />
-          </label>
-
-          <label>
-            Operating System
-            <input
-              type="text"
-              name="os"
-              value={deviceData.os}
-              onChange={(e) =>
-                handleInputChange(
-                  e.target.name as keyof DeviceCreate,
-                  e.target.value,
-                )
-              }
-              placeholder="Windows 11"
-            />
-          </label>
-
-          <label>
-            MS Office
-            <input
-              type="text"
-              name="msoffice"
-              value={deviceData.msoffice}
-              onChange={(e) =>
-                handleInputChange(
-                  e.target.name as keyof DeviceCreate,
-                  e.target.value,
-                )
-              }
-              placeholder="Office 365"
-            />
-          </label>
-
-          <label>
-            Buy Date
-            <input
-              type="date"
-              name="buy_date"
-              value={deviceData.buy_date}
-              onChange={(e) =>
-                handleInputChange(
-                  e.target.name as keyof DeviceCreate,
-                  e.target.value,
-                )
-              }
-            />
-          </label>
+      <form className="modal-form" onSubmit={handleSubmit}>
+        <div className="form-grid">
+          {FIELDS.map((f) => (
+            <label
+              key={f.key}
+              className={`form-field${f.full ? " form-field-full" : ""}`}
+            >
+              <span>
+                {f.label}
+                {f.required && <span className="req">*</span>}
+              </span>
+              <Input
+                type={f.type}
+                value={deviceData[f.key]}
+                required={f.required}
+                placeholder={f.placeholder}
+                onChange={(e) => handleInputChange(f.key, e.target.value)}
+              />
+            </label>
+          ))}
         </div>
 
         {error && <p className="form-error">{error}</p>}
 
         <div className="modal-actions">
-          <button
-            type="button"
-            className="cancel-btn"
-            onClick={onClose}
-            disabled={submitting}
-          >
+          <Button onClick={onClose} disabled={submitting}>
             Cancel
-          </button>
-
-          <button type="submit" className="create-btn" disabled={submitting}>
-            {submitting ? "Creating..." : "Create Device"}
-          </button>
+          </Button>
+          <Button type="primary" htmlType="submit" loading={submitting}>
+            Create Device
+          </Button>
         </div>
       </form>
     </Modal>

@@ -1,14 +1,22 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { toast } from "react-toastify";
 import * as XLSX from "xlsx";
+import { Button, Input, Table, Upload } from "antd";
+import type { TableColumnsType } from "antd";
 import type { User, UserCreate } from "../types";
 import { teamsOptions } from "../types";
 import { useLoading } from "../hook/LoadingContext";
 import { listUsers } from "../api/users";
-import CustomButton from "./CustomButton";
 import { CreateUserModal } from "./Modal/CreateUserModal";
 import { createUserBatch, deleteUser, searchUser } from "../api/users";
 import { ConfirmModal } from "./Modal/ConfirmModal";
+import {
+  PlusIcon,
+  SearchIcon,
+  UploadIcon,
+  TrashIcon,
+  EditIcon,
+} from "./icons";
 
 export const UserMainScreen = () => {
   const [users, setUsers] = useState<User[]>([]);
@@ -196,135 +204,155 @@ export const UserMainScreen = () => {
     }
   };
 
+  const columns: TableColumnsType<User> = [
+    {
+      title: "No.",
+      key: "index",
+      width: 60,
+      render: (_, __, index) => index + 1,
+    },
+    { title: "Employee Code", dataIndex: "employee_code", key: "employee_code" },
+    {
+      title: "Name",
+      dataIndex: "name",
+      key: "name",
+      render: (name) =>
+        name?.trim() ? (
+          <span style={{ fontWeight: 600 }}>{name}</span>
+        ) : (
+          <span className="text-faint">—</span>
+        ),
+    },
+    {
+      title: "Team",
+      dataIndex: "team",
+      key: "team",
+      render: (team) =>
+        team?.trim() ? (
+          <span className="pill pill-accent">{team}</span>
+        ) : (
+          <span className="text-faint">—</span>
+        ),
+    },
+    {
+      title: "",
+      key: "options",
+      width: 100,
+      render: (_, user) => (
+        <div className="flex gap-1">
+          <Button
+            type="text"
+            icon={<EditIcon size={18} />}
+            onClick={() => {
+              setSelectedUser(user);
+              setIsEdit(true);
+              setIsOpenCreateUserModal(true);
+            }}
+          />
+          <Button
+            type="text"
+            danger
+            icon={<TrashIcon size={18} />}
+            onClick={() => {
+              setDeleteUserData(user);
+              setIsDeleteModalOpen(true);
+            }}
+          />
+        </div>
+      ),
+    },
+  ];
+
+  const selectedCount = users.filter((u) => u.selected).length;
+
   return (
     <>
-      <div className="menu-title">User List</div>
-      <div className="p-3 flex place-content-between ">
+      <div className="screen-toolbar">
         <form
+          className="screen-search"
           onSubmit={(e) => {
             e.preventDefault();
             handleSearch();
           }}
         >
-          <input
+          <Input
             name="searchData"
-            type="text"
-            className="text-[16px] p-1 mr-2 "
-            placeholder="Search users..."
+            prefix={<SearchIcon size={16} />}
+            allowClear
+            style={{ width: 280 }}
+            placeholder="Search users…"
             value={searchData}
             onChange={(e) => setSearchData(e.target.value)}
           />
-          <CustomButton type="submit">Search</CustomButton>
+          <Button type="primary" htmlType="submit">
+            Search
+          </Button>
         </form>
-        <div>
-          <CustomButton
-            className="mr-1"
-            // color="bg-emerald-500"
-            hoverColor="hover:bg-emerald-600"
-            onClick={() => setIsOpenCreateUserModal(true)}
+        <div className="toolbar-actions">
+          <Upload
+            accept=".xlsx,.xls"
+            showUploadList={false}
+            beforeUpload={(file) => {
+              handleImport(file);
+              return false;
+            }}
           >
-            + Create User
-          </CustomButton>
-          <label className="ml-1 inline-block cursor-pointer rounded-md px-4 py-2 text-white transition-colors duration-200 hover:bg-green-600">
-            {importFile ? "Last import file: " + importFile.name : "Import"}
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept=".xlsx,.xls"
-              className="hidden"
-              onChange={(e) => {
-                const file = e.target.files?.[0];
-                if (file) handleImport(file);
-              }}
-            />
-          </label>
-          <CustomButton
-            className="ml-2"
-            hoverColor="hover:bg-red-600"
+            <Button icon={<UploadIcon size={16} />}>
+              {importFile ? importFile.name : "Import"}
+            </Button>
+          </Upload>
+          <Button
+            danger
+            icon={<TrashIcon size={16} />}
+            disabled={selectedCount === 0}
             onClick={handleDeleteSelected}
           >
-            Deleted
-          </CustomButton>
+            Delete{selectedCount > 0 ? ` (${selectedCount})` : ""}
+          </Button>
+          <Button
+            type="primary"
+            icon={<PlusIcon size={16} />}
+            onClick={() => {
+              setIsEdit(false);
+              setSelectedUser({ employee_code: "", name: "", team: "" });
+              setIsOpenCreateUserModal(true);
+            }}
+          >
+            Add User
+          </Button>
         </div>
       </div>
 
-      <div>
-        <hr className="mx-2" />
-        <br />
-        <div className="device-table-container">
-          <table className="device-table">
-            <thead>
-              <tr>
-                <th>
-                  <input
-                    className="cursor-pointer scale-150"
-                    type="checkbox"
-                    name="checkAllUsers"
-                    checked={isSelectedAll}
-                    onChange={() => {
-                      setIsSelectedAll((oldState) => !oldState);
-                    }}
-                  />
-                </th>
-                <th>No.</th>
-                <th>Employee Code</th>
-                <th>Name</th>
-                <th>Team</th>
-                <th style={{ width: "5vw" }}>Options</th>
-              </tr>
-            </thead>
-            <tbody>
-              {users.map((user) => {
-                return (
-                  <tr key={user.employee_code}>
-                    <td className="text-center">
-                      <input
-                        className="cursor-pointer scale-150"
-                        type="checkbox"
-                        name={`check_${user.employee_code}`}
-                        checked={user.selected || false}
-                        onChange={(e) => {
-                          const isChecked = e.target.checked;
-                          setUsers((prevUsers) =>
-                            prevUsers.map((u) =>
-                              u.employee_code === user.employee_code
-                                ? { ...u, selected: isChecked }
-                                : u,
-                            ),
-                          );
-                        }}
-                      />
-                    </td>
-                    <td className="text-center">{users.indexOf(user) + 1}</td>
-                    <td>{user.employee_code}</td>
-                    <td>{user.name}</td>
-                    <td>{user.team}</td>
-                    <td className="flex gap-2">
-                      <CustomButton
-                        hoverColor="hover:bg-orange-500"
-                        onClick={() => {
-                          setSelectedUser(user);
-                          setIsEdit(true);
-                          setIsOpenCreateUserModal(true);
-                        }}
-                      >
-                        Edit
-                      </CustomButton>
-                      <CustomButton
-                        hoverColor="hover:bg-red-700"
-                        onClick={() => {
-                          setDeleteUserData(user);
-                          setIsDeleteModalOpen(true);
-                        }}
-                      >
-                        Delete
-                      </CustomButton>
-                    </td>
-                  </tr>
+      <div className="panel">
+        <div className="panel-head">
+          <span className="panel-title">Employee directory</span>
+          <span className="panel-count">{users.length} users</span>
+        </div>
+        <div className="table-wrap">
+          <Table<User>
+            rowKey="employee_code"
+            dataSource={users}
+            columns={columns}
+            pagination={false}
+            scroll={{ x: "max-content" }}
+            rowSelection={{
+              selectedRowKeys: users
+                .filter((user) => user.selected)
+                .map((user) => user.employee_code),
+              onSelectAll: (selected) => {
+                setIsSelectedAll(selected);
+              },
+              onSelect: (record, selected) => {
+                setUsers((prevUsers) =>
+                  prevUsers.map((u) =>
+                    u.employee_code === record.employee_code
+                      ? { ...u, selected }
+                      : u,
+                  ),
                 );
-              })}
-            </tbody>
-          </table>
+              },
+            }}
+          />
         </div>
       </div>
       {isOpenCreateUserModal && (

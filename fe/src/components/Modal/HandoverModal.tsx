@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { Button, Input, Select } from "antd";
 import { listDevices } from "../../api/devices";
 import { createHandover } from "../../api/handovers";
 import { listUsers } from "../../api/users";
@@ -77,89 +78,71 @@ function HandoverModal({ onClose }: { onClose: () => void }) {
     }
   };
 
+  const disabled = loading || !!loadError || submitting;
+  const placeholder = (noun: string) =>
+    loading ? `Loading ${noun}…` : loadError ? `Could not load ${noun}` : `Select a ${noun}`;
+
+  const deviceOptions = devices.map((d) => ({
+    value: d.serial_number,
+    label: d.name ? `${d.name} (${d.serial_number})` : d.serial_number,
+  }));
+  const userOptions = users.map((u) => ({
+    value: u.employee_code,
+    label: u.name ? `${u.employee_code} — ${u.name}` : u.employee_code,
+  }));
+
   return (
-    <Modal title="Handover" onClose={onClose}>
-      <form className="modal-form handover-form" onSubmit={handleSubmit}>
-        <div className="handover-grid">
-          <label>
-            Device name
-            <select
-              value={serialNumber}
-              onChange={(e) => setSerialNumber(e.target.value)}
-              required
-              disabled={loading || !!loadError || submitting}
-            >
-              <option value="">
-                {loading
-                  ? "Loading devices…"
-                  : loadError
-                    ? "Could not load devices"
-                    : "Select a device"}
-              </option>
-
-              {devices.map((device) => (
-                <option key={device.serial_number} value={device.serial_number}>
-                  {device.name ?? device.serial_number}
-                  {device.name ? ` (${device.serial_number})` : ""}
-                </option>
-              ))}
-            </select>
+    <Modal title="Record Handover" onClose={onClose}>
+      <form className="modal-form" onSubmit={handleSubmit}>
+        <div className="form-grid">
+          <label className="form-field form-field-full">
+            <span>
+              Device<span className="req">*</span>
+            </span>
+            <Select
+              showSearch
+              optionFilterProp="label"
+              value={serialNumber || undefined}
+              placeholder={placeholder("device")}
+              disabled={disabled}
+              onChange={setSerialNumber}
+              options={deviceOptions}
+            />
           </label>
 
-          <label>
-            From employee
-            <select
-              value={fromEmployeeCode}
-              onChange={(e) => setFromEmployeeCode(e.target.value)}
-              required
-              disabled={loading || !!loadError || submitting}
-            >
-              <option value="">
-                {loading
-                  ? "Loading users…"
-                  : loadError
-                    ? "Could not load users"
-                    : "Select an employee"}
-              </option>
-
-              {users.map((user) => (
-                <option key={user.employee_code} value={user.employee_code}>
-                  {user.employee_code}
-                  {user.name ? ` — ${user.name}` : ""}
-                </option>
-              ))}
-            </select>
+          <label className="form-field">
+            <span>
+              From employee<span className="req">*</span>
+            </span>
+            <Select
+              showSearch
+              optionFilterProp="label"
+              value={fromEmployeeCode || undefined}
+              placeholder={placeholder("employee")}
+              disabled={disabled}
+              onChange={setFromEmployeeCode}
+              options={userOptions}
+            />
           </label>
 
-          <label>
-            To employee
-            <select
-              value={toEmployeeCode}
-              onChange={(e) => setToEmployeeCode(e.target.value)}
-              required
-              disabled={loading || !!loadError || submitting}
-            >
-              <option value="">
-                {loading
-                  ? "Loading users…"
-                  : loadError
-                    ? "Could not load users"
-                    : "Select an employee"}
-              </option>
-
-              {users.map((user) => (
-                <option key={user.employee_code} value={user.employee_code}>
-                  {user.employee_code}
-                  {user.name ? ` — ${user.name}` : ""}
-                </option>
-              ))}
-            </select>
+          <label className="form-field">
+            <span>
+              To employee<span className="req">*</span>
+            </span>
+            <Select
+              showSearch
+              optionFilterProp="label"
+              value={toEmployeeCode || undefined}
+              placeholder={placeholder("employee")}
+              disabled={disabled}
+              onChange={setToEmployeeCode}
+              options={userOptions}
+            />
           </label>
 
-          <label className="handover-reason">
-            Reason
-            <input
-              type="text"
+          <label className="form-field form-field-full">
+            <span>Reason</span>
+            <Input
               value={reason}
               onChange={(e) => setReason(e.target.value)}
               disabled={submitting}
@@ -172,22 +155,17 @@ function HandoverModal({ onClose }: { onClose: () => void }) {
         {error && <p className="form-error">{error}</p>}
 
         <div className="modal-actions">
-          <button
-            className="cancel-btn"
-            type="button"
-            onClick={onClose}
-            disabled={submitting}
-          >
+          <Button onClick={onClose} disabled={submitting}>
             Cancel
-          </button>
-
-          <button
-            className="create-btn"
-            type="submit"
-            disabled={loading || !!loadError || submitting}
+          </Button>
+          <Button
+            type="primary"
+            htmlType="submit"
+            loading={submitting}
+            disabled={loading || !!loadError}
           >
-            {submitting ? "Submitting…" : "Submit"}
-          </button>
+            Submit
+          </Button>
         </div>
       </form>
     </Modal>

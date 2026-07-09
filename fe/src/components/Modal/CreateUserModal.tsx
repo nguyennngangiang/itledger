@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { Button, Input, Select } from "antd";
 import { createUser, updateUser } from "../../api/users";
 import type { UserCreate } from "../../types";
 import { Modal } from "./Modal";
@@ -65,12 +66,13 @@ export function CreateUserModal({
 
   return (
     <Modal title={isEdit ? "Edit User" : "Create User"} onClose={onClose}>
-      <form className="modal-form user-form" onSubmit={handleSubmit}>
-        <div className="user-grid">
-          <label>
-            Employee code *
-            <input
-              type="text"
+      <form className="modal-form" onSubmit={handleSubmit}>
+        <div className="form-grid">
+          <label className="form-field">
+            <span>
+              Employee code<span className="req">*</span>
+            </span>
+            <Input
               value={formData.employee_code}
               onChange={(e) => handleInputChange(e)}
               required
@@ -80,10 +82,11 @@ export function CreateUserModal({
             />
           </label>
 
-          <label>
-            Name *
-            <input
-              type="text"
+          <label className="form-field">
+            <span>
+              Name<span className="req">*</span>
+            </span>
+            <Input
               value={formData.name || ""}
               onChange={(e) => handleInputChange(e)}
               required
@@ -92,35 +95,32 @@ export function CreateUserModal({
             />
           </label>
 
-          <label className="user-team">
-            Team *
-            <select
-              value={formData.team || ""}
-              onChange={(e) => handleInputChange(e)}
-              required
-              name="team"
-              defaultValue={selectedUser?.team || ""}
-            >
-              <option value="" disabled>
-                Select a team
-              </option>
-              {teamsOptions.map((t) => (
-                <option key={t.team_id} value={t.team_id}>
-                  {t.team_name}
-                </option>
-              ))}
-            </select>
+          <label className="form-field form-field-full">
+            <span>
+              Team<span className="req">*</span>
+            </span>
+            <Select
+              value={formData.team || undefined}
+              placeholder="Select a team"
+              onChange={(value) =>
+                handleInputChange({
+                  target: { name: "team", value },
+                } as React.ChangeEvent<HTMLSelectElement>)
+              }
+              options={teamsOptions.map((t) => ({
+                value: t.team_id,
+                label: t.team_name,
+              }))}
+            />
           </label>
         </div>
 
         <div className="modal-actions">
-          <button className="cancel-btn" type="button" onClick={onClose}>
-            Cancel
-          </button>
+          <Button onClick={onClose}>Cancel</Button>
 
-          <button className="create-btn" type="submit">
+          <Button type="primary" htmlType="submit">
             {isEdit ? "Update" : "Create"}
-          </button>
+          </Button>
         </div>
       </form>
     </Modal>

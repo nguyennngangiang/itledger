@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { Button, Input, Select } from "antd";
 import { listDevices } from "../../api/devices";
 import { createMaintenance } from "../../api/maintenance";
 import { listTeams } from "../../api/teams";
@@ -91,113 +92,113 @@ function MaintenanceModal({ onClose }: { onClose: () => void }) {
     }
   };
 
+  const disabled = loading || !!loadError || submitting;
+
   return (
-    <Modal title="Maintenance" onClose={onClose}>
-      <form className="modal-form maintenance-form" onSubmit={handleSubmit}>
-        <div className="maintenance-grid">
-          <label>
-            Device serial number
-            <select
-              value={serialNumber}
-              onChange={(e) => setSerialNumber(e.target.value)}
-              required
-              disabled={loading || !!loadError || submitting}
-            >
-              <option value="">
-                {loading
+    <Modal title="Log Maintenance" onClose={onClose}>
+      <form className="modal-form" onSubmit={handleSubmit}>
+        <div className="form-grid">
+          <label className="form-field">
+            <span>
+              Device<span className="req">*</span>
+            </span>
+            <Select
+              showSearch
+              optionFilterProp="label"
+              value={serialNumber || undefined}
+              placeholder={
+                loading
                   ? "Loading devices…"
                   : loadError
                     ? "Could not load devices"
-                    : "Select a device"}
-              </option>
-              {devices.map((device) => (
-                <option key={device.serial_number} value={device.serial_number}>
-                  {device.serial_number}
-                  {device.name ? ` — ${device.name}` : ""}
-                </option>
-              ))}
-            </select>
-          </label>
-
-          <label>
-            Team
-            <select
-              value={teamId}
-              onChange={(e) => setTeamId(e.target.value)}
-              required
-              disabled={loading || !!loadError || submitting}
-            >
-              <option value="">
-                {loading
-                  ? "Loading teams…"
-                  : loadError
-                    ? "Could not load teams"
-                    : "Select a team"}
-              </option>
-              {teams.map((team) => (
-                <option key={team.team_id} value={team.team_id}>
-                  {team.team_id}
-                  {team.team_name ? ` — ${team.team_name}` : ""}
-                </option>
-              ))}
-            </select>
-          </label>
-
-          <label>
-            Part that needs to be repair
-            <input
-              type="text"
-              value={part}
-              onChange={(e) => setPart(e.target.value)}
-              disabled={submitting}
+                    : "Select a device"
+              }
+              disabled={disabled}
+              onChange={setSerialNumber}
+              options={devices.map((d) => ({
+                value: d.serial_number,
+                label: d.name
+                  ? `${d.serial_number} — ${d.name}`
+                  : d.serial_number,
+              }))}
             />
           </label>
 
-          <label>
-            Description of the problem
-            <input
-              type="text"
+          <label className="form-field">
+            <span>
+              Team<span className="req">*</span>
+            </span>
+            <Select
+              showSearch
+              optionFilterProp="label"
+              value={teamId || undefined}
+              placeholder={
+                loading
+                  ? "Loading teams…"
+                  : loadError
+                    ? "Could not load teams"
+                    : "Select a team"
+              }
+              disabled={disabled}
+              onChange={setTeamId}
+              options={teams.map((t) => ({
+                value: t.team_id,
+                label: t.team_name ? `${t.team_id} — ${t.team_name}` : t.team_id,
+              }))}
+            />
+          </label>
+
+          <label className="form-field">
+            <span>Part to repair</span>
+            <Input
+              value={part}
+              onChange={(e) => setPart(e.target.value)}
+              disabled={submitting}
+              placeholder="e.g. Battery"
+            />
+          </label>
+
+          <label className="form-field">
+            <span>Cost (VND)</span>
+            <Input
+              inputMode="decimal"
+              value={cost}
+              onChange={(e) => setCost(e.target.value)}
+              disabled={submitting}
+              placeholder="0"
+            />
+          </label>
+
+          <label className="form-field form-field-full">
+            <span>Problem description</span>
+            <Input
               value={problem}
               onChange={(e) => setProblem(e.target.value)}
               disabled={submitting}
             />
           </label>
 
-          <label>
-            Solution of the problem
-            <input
-              type="text"
+          <label className="form-field">
+            <span>Solution</span>
+            <Input
               value={solution}
               onChange={(e) => setSolution(e.target.value)}
               disabled={submitting}
             />
           </label>
 
-          <label>
-            Result of the repair
-            <input
-              type="text"
+          <label className="form-field">
+            <span>Result</span>
+            <Input
               value={result}
               onChange={(e) => setResult(e.target.value)}
               disabled={submitting}
             />
           </label>
 
-          <label>
-            Cost of the repair
-            <input
-              type="text"
-              inputMode="decimal"
-              value={cost}
-              onChange={(e) => setCost(e.target.value)}
-              disabled={submitting}
-            />
-          </label>
-
-          <label>
-            Remark
-            <input
-              type="text"
+          <label className="form-field form-field-full">
+            <span>Remark</span>
+            <Input
               value={remark}
               onChange={(e) => setRemark(e.target.value)}
               disabled={submitting}
@@ -209,22 +210,17 @@ function MaintenanceModal({ onClose }: { onClose: () => void }) {
         {error && <p className="form-error">{error}</p>}
 
         <div className="modal-actions">
-          <button
-            className="cancel-btn"
-            type="button"
-            onClick={onClose}
-            disabled={submitting}
-          >
+          <Button onClick={onClose} disabled={submitting}>
             Cancel
-          </button>
-
-          <button
-            className="create-btn"
-            type="submit"
-            disabled={loading || !!loadError || submitting}
+          </Button>
+          <Button
+            type="primary"
+            htmlType="submit"
+            loading={submitting}
+            disabled={loading || !!loadError}
           >
-            {submitting ? "Submitting…" : "Submit"}
-          </button>
+            Submit
+          </Button>
         </div>
       </form>
     </Modal>
