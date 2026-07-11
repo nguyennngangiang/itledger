@@ -1,0 +1,155 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-07-11T00:00:00Z",
+  "title": "Design System: IT Ledger",
+  "extensions": {
+    "colorMeta": {
+      "accent": {
+        "role": "primary",
+        "displayName": "Periwinkle",
+        "canonical": "#7c74e8",
+        "tonalRamp": ["#26224a", "#332d63", "#443c86", "#564bab", "#6b60d0", "#8b83f0", "#b3adf6", "#dedbfb"]
+      },
+      "aurora-fuchsia": {
+        "role": "secondary",
+        "displayName": "Aurora Fuchsia",
+        "canonical": "#d946ef",
+        "tonalRamp": ["#3d0a47", "#5c0f6b", "#7d1591", "#a01cb8", "#c130da", "#d946ef", "#e888f6", "#f4c4fb"]
+      },
+      "bg": {
+        "role": "neutral",
+        "displayName": "Lavender Field",
+        "canonical": "#f5f4fb",
+        "tonalRamp": ["#242235", "#38364d", "#514e6b", "#726f8f", "#9995b3", "#c2bfd6", "#e3e1ee", "#f5f4fb"]
+      },
+      "text": {
+        "role": "neutral",
+        "displayName": "Ink",
+        "canonical": "#2b2740",
+        "tonalRamp": ["#2b2740", "#413c5c", "#57517a", "#6b6785", "#8b87a3", "#a5a1bb", "#c9c6d9", "#ece9f5"]
+      }
+    },
+    "typographyMeta": {
+      "display": { "displayName": "Display", "purpose": "Dashboard KPI numerals only — the one place gradient-clipped text is permitted." },
+      "headline": { "displayName": "Headline", "purpose": "Page titles in the sub-header." },
+      "title": { "displayName": "Title", "purpose": "Panel titles, quick-action titles, card headings." },
+      "body": { "displayName": "Body", "purpose": "Default UI text and prose (cap prose at 65–75ch)." },
+      "label": { "displayName": "Label", "purpose": "Uppercase table column headers and micro-labels." }
+    },
+    "shadows": [
+      { "name": "ambient-sm", "value": "0 1px 2px rgba(15,23,42,.04), 0 1px 3px rgba(15,23,42,.06)", "purpose": "Resting cards and inputs." },
+      { "name": "ambient-md", "value": "0 4px 12px -2px rgba(15,23,42,.08), 0 2px 6px -2px rgba(15,23,42,.05)", "purpose": "Hovered cards, popovers." },
+      { "name": "lifted-lg", "value": "0 20px 40px -12px rgba(15,23,42,.22)", "purpose": "Modals and the loading card." },
+      { "name": "aurora-glow", "value": "0 10px 34px -22px rgba(124,116,232,.5)", "purpose": "Periwinkle-tinted companion glow on panels, stat cards, active nav pill, primary buttons; deepens to .65 on hover." }
+    ],
+    "motion": [
+      { "name": "state", "value": "0.15s ease", "purpose": "Default for hover/focus/active on controls (chips, nav, buttons)." },
+      { "name": "lift", "value": "0.18s ease", "purpose": "Card hover lift + shadow deepening." },
+      { "name": "zoom", "value": "0.34s cubic-bezier(0.22, 1, 0.36, 1)", "purpose": "Dashboard chart zoom-on-hover." },
+      { "name": "sheen", "value": "0.6s ease", "purpose": "Diagonal sheen sweep across primary buttons and stat cards on hover." }
+    ],
+    "breakpoints": [
+      { "name": "sm", "value": "560px" },
+      { "name": "md", "value": "760px" },
+      { "name": "nav-collapse", "value": "860px" },
+      { "name": "lg", "value": "1024px" }
+    ]
+  },
+  "components": [
+    {
+      "name": "Primary Button",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "The one loud control — periwinkle→fuchsia gradient with an aurora glow and a hover sheen sweep. Reserved for the primary action in a modal or toolbar.",
+      "html": "<button class=\"ds-btn-primary\">Save device</button>",
+      "css": ".ds-btn-primary { position: relative; overflow: hidden; height: 38px; padding: 0 18px; border: none; border-radius: 8px; color: #fff; font: 600 14px/1 Inter, system-ui, sans-serif; cursor: pointer; background: linear-gradient(120deg, #8b83f0, #7c74e8 45%, #a855f7); background-size: 200% 100%; box-shadow: 0 8px 22px -8px rgba(124,116,232,.85); transition: background-position .5s ease, transform .15s ease, box-shadow .2s ease; } .ds-btn-primary::after { content: ''; position: absolute; top: 0; left: -150%; width: 60%; height: 100%; background: linear-gradient(100deg, transparent, rgba(255,255,255,.55), transparent); transform: skewX(-20deg); transition: left .6s ease; } .ds-btn-primary:hover { background-position: 100% 0; transform: translateY(-1px); box-shadow: 0 12px 28px -8px rgba(168,85,247,.9); } .ds-btn-primary:hover::after { left: 150%; } .ds-btn-primary:focus-visible { outline: 2px solid #7c74e8; outline-offset: 2px; }"
+    },
+    {
+      "name": "Quick-add Button",
+      "kind": "button",
+      "refersTo": "button-quick-add",
+      "description": "Calm secondary action — periwinkle-wash at rest, fills solid periwinkle with a glow-lift on hover. Used for top-bar add actions.",
+      "html": "<button class=\"ds-btn-quick\"><svg viewBox=\"0 0 24 24\" width=\"15\" height=\"15\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2.2\" stroke-linecap=\"round\"><path d=\"M12 5v14M5 12h14\"/></svg><span>Device</span></button>",
+      "css": ".ds-btn-quick { display: inline-flex; align-items: center; gap: 6px; height: 34px; padding: 0 12px; border: 1px solid var(--accent-border, #d6d2f7); border-radius: 8px; background: var(--accent-bg, #eeecfd); color: var(--accent, #7c74e8); font: 600 13px/1 Inter, system-ui, sans-serif; cursor: pointer; transition: all .15s ease; } .ds-btn-quick:hover { border-color: var(--accent, #7c74e8); background: var(--accent, #7c74e8); color: #fff; transform: translateY(-1px); box-shadow: 0 6px 18px -4px rgba(124,116,232,.7); } .ds-btn-quick:focus-visible { outline: 2px solid #7c74e8; outline-offset: 2px; }"
+    },
+    {
+      "name": "Glass Card",
+      "kind": "card",
+      "refersTo": "card",
+      "description": "Frosted-glass panel floating over the aurora field, with a periwinkle-tinted glow that deepens and lifts on hover.",
+      "html": "<article class=\"ds-card\"><h3 class=\"ds-card-title\">Device fleet</h3><p class=\"ds-card-body\">248 active devices across 6 teams.</p></article>",
+      "css": ".ds-card { background: rgba(255,255,255,.9); -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px); border: 1px solid rgba(255,255,255,.7); border-radius: 16px; padding: 20px; box-shadow: 0 1px 2px rgba(15,23,42,.04), 0 10px 34px -22px rgba(124,116,232,.5); transition: transform .18s ease, box-shadow .18s ease; } .ds-card:hover { transform: translateY(-3px); box-shadow: 0 4px 12px -2px rgba(15,23,42,.08), 0 16px 44px -22px rgba(124,116,232,.65); } .ds-card-title { margin: 0 0 6px; font: 600 15px/1.3 Inter, sans-serif; color: #2b2740; } .ds-card-body { margin: 0; font: 400 14px/1.5 Inter, sans-serif; color: #6b6785; }"
+    },
+    {
+      "name": "Status Filter Chip",
+      "kind": "chip",
+      "refersTo": "chip",
+      "description": "Pill-shaped filter with a count badge; inverts to periwinkle-wash with a leading dot when active.",
+      "html": "<div style=\"display:flex;gap:8px\"><button class=\"ds-chip active\"><span class=\"ds-chip-dot\"></span>In use<span class=\"ds-chip-count\">182</span></button><button class=\"ds-chip\"><span class=\"ds-chip-dot\" style=\"background:#94a3b8\"></span>In stock<span class=\"ds-chip-count\">44</span></button></div>",
+      "css": ".ds-chip { display: inline-flex; align-items: center; gap: 7px; height: 32px; padding: 0 12px; border: 1px solid var(--border, #ece9f5); border-radius: 999px; background: var(--surface, #fff); color: var(--text-muted, #6b6785); font: 600 13px/1 Inter, sans-serif; cursor: pointer; transition: all .15s ease; } .ds-chip:hover { border-color: var(--accent-border, #d6d2f7); color: var(--text, #2b2740); } .ds-chip.active { border-color: var(--accent, #7c74e8); color: var(--accent, #7c74e8); background: var(--accent-bg, #eeecfd); } .ds-chip-dot { width: 8px; height: 8px; border-radius: 999px; background: #7c74e8; } .ds-chip-count { font-size: 11.5px; padding: 1px 7px; border-radius: 999px; background: var(--surface-muted, #f7f5fd); color: var(--text-muted, #6b6785); } .ds-chip.active .ds-chip-count { background: #fff; color: var(--accent, #7c74e8); }"
+    },
+    {
+      "name": "Top Nav Item",
+      "kind": "nav",
+      "refersTo": "nav-item-active",
+      "description": "Glassy top-bar nav; the active item is a periwinkle→fuchsia gradient pill with an aurora glow (slid into place by anime.js in the app).",
+      "html": "<nav class=\"ds-nav\"><button class=\"ds-nav-item active\">Dashboard</button><button class=\"ds-nav-item\">Devices</button><button class=\"ds-nav-item\">Maintenance</button></nav>",
+      "css": ".ds-nav { display: inline-flex; gap: 4px; padding: 6px; border-radius: 12px; background: rgba(236,234,251,.72); -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px); } .ds-nav-item { height: 38px; padding: 0 14px; border: none; border-radius: 9px; background: transparent; color: var(--text-muted, #6b6785); font: 500 14px/1 Inter, sans-serif; cursor: pointer; transition: all .15s ease; } .ds-nav-item:hover { color: #2b2740; background: rgba(124,116,232,.1); } .ds-nav-item.active { color: #fff; font-weight: 600; background: linear-gradient(135deg, #8b83f0, #7c74e8); box-shadow: 0 8px 18px -10px rgba(124,116,232,.8); } .ds-nav-item:focus-visible { outline: 2px solid #7c74e8; outline-offset: 2px; }"
+    },
+    {
+      "name": "Relevance Meter",
+      "kind": "custom",
+      "refersTo": "signature",
+      "description": "Signature semantic-search element — a periwinkle→fuchsia fill whose width maps to a device's relevance score, with a bold periwinkle percentage.",
+      "html": "<div class=\"ds-relevance\"><div class=\"ds-relevance-track\"><div class=\"ds-relevance-fill\" style=\"width:78%\"></div></div><span class=\"ds-relevance-num\">78%</span></div>",
+      "css": ".ds-relevance { display: inline-flex; align-items: center; gap: 8px; } .ds-relevance-track { position: relative; width: 74px; height: 7px; border-radius: 999px; background: var(--surface-muted, #f7f5fd); overflow: hidden; } .ds-relevance-fill { position: absolute; inset: 0 auto 0 0; border-radius: 999px; background: linear-gradient(90deg, #8b83f0, #d946ef); transition: width .4s ease; } .ds-relevance-num { font: 700 12px/1 Inter, sans-serif; color: var(--accent, #7c74e8); min-width: 34px; }"
+    },
+    {
+      "name": "Accent Pill",
+      "kind": "chip",
+      "refersTo": "pill-accent",
+      "description": "Compact status/meta pill in the periwinkle-wash family; sibling variants swap to success/warning/danger washes.",
+      "html": "<span class=\"ds-pill\">Assigned</span>",
+      "css": ".ds-pill { display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px; border-radius: 999px; border: 1px solid var(--accent-border, #d6d2f7); background: var(--accent-bg, #eeecfd); color: var(--accent, #7c74e8); font: 600 12px/1.6 Inter, sans-serif; }"
+    }
+  ],
+  "narrative": {
+    "northStar": "The Aurora Workspace",
+    "overview": "IT Ledger is a workspace that shimmers. The base is quiet, credible enterprise software — Inter type, a lavender-tinted field, generous whitespace, tables that mean business — but the whole surface is lit from within by a periwinkle-to-fuchsia aurora that appears in the moments that matter: the active nav pill, a KPI, a relevance meter, a hover glow. A ledger only reports accurately if people keep it current, and people only keep it current if opening the tool feels good; delight here is the mechanism that keeps the data alive. The calm always wins the argument with the sparkle: controls are refined and understated, motion is brief and state-bearing, and the aurora is a rare accent, never a wash across every panel.",
+    "keyCharacteristics": [
+      "Lavender-tinted light base (#f5f4fb) with frosted-glass panels floating above a soft radial-gradient field.",
+      "One committed brand hue — periwinkle #7c74e8 — carrying every action, selection, and state cue.",
+      "A periwinkle→fuchsia aurora gradient reserved for signature moments (active nav, KPIs, relevance meters, primary CTA).",
+      "Inter throughout; a fixed rem-ish scale, not fluid clamps.",
+      "Soft, always-present depth that deepens on interaction.",
+      "Refined-and-calm components; delight arrives through motion and light, not loud controls.",
+      "Motion is first-class but every effect has a prefers-reduced-motion fallback."
+    ],
+    "rules": [
+      { "name": "The One Voice Rule", "body": "Periwinkle #7c74e8 is the only accent. Everything interactive speaks in it; nothing competes with it.", "section": "colors" },
+      { "name": "The Aurora-Only-In-Gradient Rule", "body": "Fuchsia and violet exist only as the far end of a periwinkle gradient, on a small set of signature elements. A flat fuchsia button or standalone violet fill is forbidden — that is the AI-slop tell this brand rejects.", "section": "colors" },
+      { "name": "The One Family Rule", "body": "Inter does all the work. No display face, no serif, no second sans. Hierarchy is weight and size.", "section": "typography" },
+      { "name": "The Fixed-Scale Rule", "body": "Type sizes are fixed steps, not fluid clamp(). A KPI must read identically in a narrow panel and a wide one.", "section": "typography" },
+      { "name": "The Tinted-Glow Rule", "body": "Every meaningful elevation pairs a neutral drop shadow with a periwinkle-tinted glow. A pure gray shadow with no aurora tint reads as a different, colder product.", "section": "elevation" },
+      { "name": "The Glass-Panel Rule", "body": "Content surfaces are translucent glass over the field, not opaque blocks. backdrop-filter blur is a defining material — but it lives on structural panels, never on tiny controls.", "section": "elevation" }
+    ],
+    "dos": [
+      "Do keep periwinkle #7c74e8 as the only accent — one voice for every action, selection, and state.",
+      "Do confine the periwinkle→fuchsia aurora gradient to signature moments: active nav, KPI numerals, the primary CTA, the relevance meter.",
+      "Do float content on frosted-glass panels with a periwinkle-tinted glow shadow.",
+      "Do use Inter at fixed sizes and let weight (400–800) carry hierarchy.",
+      "Do keep body ink at #2b2740 for AA contrast; reserve faint ink #a5a1bb for hints and disabled states only.",
+      "Do give every device its story — surface owner, maintenance, and handover context, never a bare grid.",
+      "Do ship a prefers-reduced-motion fallback for every animation."
+    ],
+    "donts": [
+      "Don't let the dashboard collapse into generic AI-dashboard slop: the purple-gradient hero-metric template, identical icon+title+text card grids, or decorative gradient fluff. KPI gradient numerals are the one sanctioned gradient-text use.",
+      "Don't use fuchsia or violet as a flat, standalone color — they exist only inside a periwinkle gradient.",
+      "Don't build a dense legacy admin panel: no cluttered gray SAP/ServiceNow chrome.",
+      "Don't reduce a device to a raw spreadsheet row — no context-free grid of cells.",
+      "Don't introduce a second font family, a serif display face, or fluid clamp() headings.",
+      "Don't put backdrop-filter blur on tiny controls or scatter loud motion across every surface.",
+      "Don't ship a pure gray shadow with no periwinkle tint — it makes the surface read as a colder, off-brand product."
+    ]
+  }
+}

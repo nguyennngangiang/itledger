@@ -92,6 +92,17 @@ run it to verify TS changes. `npm run lint` for ESLint.
   URL, JSON handling, and `ApiError` (FastAPI's `detail`). Keep `types.ts` in
   sync with the Pydantic models.
 
+## Design Context
+
+Design decisions live in `PRODUCT.md` (strategic) and `DESIGN.md` (visual system)
+at the repo root — read them before UI work. Register is **product** (design
+serves the task), platform **web**. Users are the IT/ops team (daily data entry)
+plus managers (occasional read-only fleet checks); success is fleet visibility
+and reporting. Core principles: delight in a chore, story over cells (devices
+carry their full owner/maintenance/handover history), visibility at a glance,
+familiar affordances with personality in the seams, and playful motion that
+always has a reduced-motion fallback (WCAG 2.1 AA).
+
 ## Notes
 
 - Root-level `REAL-DATA.xlsx`, `import_data.json`, `_build_import.mjs`, and
