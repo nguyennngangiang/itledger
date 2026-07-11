@@ -13,8 +13,11 @@ in Docker calls it via AI_URL=http://host.docker.internal:8001.
 """
 import glob
 import hashlib
+import json
 import os
+import re
 from contextlib import asynccontextmanager
+from urllib import request as urlrequest
 
 import numpy as np
 import openvino as ov
@@ -28,6 +31,22 @@ DEVICES = [d.strip().upper() for d in os.getenv("EMBED_DEVICES", "NPU,GPU,CPU").
 SEQ_LEN = int(os.getenv("EMBED_SEQ_LEN", "128"))
 # BGE retrieves best when the *query* carries this instruction (docs stay as-is).
 QUERY_INSTRUCTION = "Represent this sentence for searching relevant passages: "
+# Hybrid ranking: final = semantic_cosine + LEX_WEIGHT * (query-word overlap).
+# The embedder captures meaning but is weak on exact/rare tokens (a serial, a
+# brand, "i7"); a light lexical boost floats literal hits up without letting
+# keywords dominate meaning. 0 disables it (pure semantic).
+LEX_WEIGHT = float(os.getenv("LEX_WEIGHT", "0.18"))
+_WORD_RE = re.compile(r"[a-z0-9]+")
+# Words too generic to count as evidence of a match.
+_STOP = frozenset(
+    "a an the of for to in on at by with and or is are be it this that device "
+    "laptop pc computer".split()
+)
+
+
+def _content_tokens(text: str) -> set[str]:
+    """Lowercase alphanumeric tokens, minus stopwords — for lexical overlap."""
+    return {t for t in _WORD_RE.findall(text.lower()) if t not in _STOP and len(t) > 1}
 
 _state: dict = {
     "compiled": None,
@@ -157,6 +176,175 @@ async def rank(req: RankRequest):
         _state["corpus_hash"] = digest
 
     qvec = _embed([QUERY_INSTRUCTION + req.query])[0]
-    sims = _state["corpus_vecs"] @ qvec
-    order = np.argsort(-sims)[: max(1, req.top_k)]
-    return [RankResult(id=_state["corpus_ids"][i], score=float(sims[i])) for i in order]
+    sims = _state["corpus_vecs"] @ qvec  # semantic cosine, ~[-1, 1]
+
+    # Lexical signal: fraction of the query's content words present in each doc.
+    qtok = _content_tokens(req.query)
+    if qtok and LEX_WEIGHT:
+        lex = np.array(
+            [len(qtok & _content_tokens(t)) / len(qtok) for t in texts],
+            dtype=np.float32,
+        )
+    else:
+        lex = np.zeros(len(texts), dtype=np.float32)
+
+    # Rank by the hybrid score, but report the pure semantic cosine as `score`
+    # so the relevance % stays an honest "how close in meaning" (0–1).
+    hybrid = sims + LEX_WEIGHT * lex
+    order = np.argsort(-hybrid)[: max(1, req.top_k)]
+    return [
+        RankResult(id=_state["corpus_ids"][i], score=float(min(1.0, max(0.0, sims[i]))))
+        for i in order
+    ]
+
+
+# ----------------------------------------------------------------------------
+# Local generative LLM (Ollama) — rerank / explain / ask.
+#
+# Ollama runs on this same host at :11434. We proxy it here so the whole "AI"
+# surface lives in one service and the Dockerized backend only ever talks to
+# this one at :8001 (it can't reach the host's Ollama directly). Endpoints are
+# sync `def` so FastAPI runs them in a threadpool — the model call is blocking.
+# ----------------------------------------------------------------------------
+OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434").rstrip("/")
+OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "qwen2.5:7b")
+# Leave some logical cores free so CPU inference doesn't peg every core and
+# starve the browser / UI. Default: all but 4.
+OLLAMA_NUM_THREAD = int(
+    os.getenv("OLLAMA_NUM_THREAD", str(max(4, (os.cpu_count() or 8) - 4)))
+)
+
+
+def _ollama_chat(system: str, user: str, *, want_json=False, temperature=0.2,
+                 timeout=180) -> str:
+    body = {
+        "model": OLLAMA_MODEL,
+        "messages": [
+            {"role": "system", "content": system},
+            {"role": "user", "content": user},
+        ],
+        "stream": False,
+        "options": {"temperature": temperature, "num_thread": OLLAMA_NUM_THREAD},
+    }
+    if want_json:
+        body["format"] = "json"
+    req = urlrequest.Request(
+        f"{OLLAMA_URL}/api/chat",
+        data=json.dumps(body).encode("utf-8"),
+        headers={"Content-Type": "application/json"},
+    )
+    with urlrequest.urlopen(req, timeout=timeout) as resp:
+        payload = json.loads(resp.read())
+    return payload["message"]["content"]
+
+
+@app.get("/llm/health")
+def llm_health():
+    """Is the local LLM reachable and is the configured model pulled?"""
+    try:
+        with urlrequest.urlopen(f"{OLLAMA_URL}/api/tags", timeout=5) as resp:
+            models = [m["name"] for m in json.loads(resp.read()).get("models", [])]
+        base = OLLAMA_MODEL.split(":")[0]
+        ready = any(m == OLLAMA_MODEL or m.startswith(base) for m in models)
+        return {"ready": ready, "model": OLLAMA_MODEL, "available": models}
+    except Exception as e:  # noqa: BLE001 — report, don't crash health
+        return {"ready": False, "model": OLLAMA_MODEL, "error": str(e)}
+
+
+class ExplainRequest(BaseModel):
+    query: str
+    document: str
+
+
+@app.post("/explain")
+def explain(req: ExplainRequest):
+    """One-sentence, grounded 'why this device matched the search'."""
+    system = (
+        "You explain, in ONE short sentence (max 24 words), why an IT device "
+        "matches a search query. Cite the device's own facts (specs, repairs, "
+        "age, owner). No preamble, no markdown, just the sentence."
+    )
+    user = f'Search query: "{req.query}"\nDevice: {req.document}\n\nWhy does it match?'
+    try:
+        text = _ollama_chat(system, user, temperature=0.2, timeout=90)
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(503, f"LLM unavailable: {e}")
+    return {"explanation": text.strip()}
+
+
+class RerankCandidate(BaseModel):
+    id: str
+    text: str
+
+
+class RerankExample(BaseModel):
+    query: str
+    document: str
+
+
+class RerankRequest(BaseModel):
+    query: str
+    candidates: list[RerankCandidate]
+    examples: list[RerankExample] = []
+    top_k: int = 12
+
+
+@app.post("/rerank")
+def rerank(req: RerankRequest):
+    """LLM re-sort of the semantic top-K, seeded with the user's marked-correct
+    examples as few-shot anchors (this is how it 'learns' from feedback)."""
+    if not req.candidates:
+        return {"order": []}
+    shots = ""
+    if req.examples:
+        lines = "\n".join(
+            f'- for query "{e.query}", CORRECT match: {e.document}'
+            for e in req.examples
+        )
+        shots = (
+            "\nThe user previously marked these as correct matches — learn what "
+            f"they consider relevant:\n{lines}\n"
+        )
+    cand = "\n".join(f"- id={c.id}: {c.text}" for c in req.candidates)
+    system = (
+        "You rank IT-device search results by relevance to the query. "
+        "Consider meaning, specs, repair history, age and owner. "
+        'Respond ONLY as JSON: {"ranking":[{"id":"<id>","reason":"<short why>"}]} '
+        "with every candidate id, best match first."
+    )
+    user = f'Query: "{req.query}"{shots}\nCandidates:\n{cand}'
+    try:
+        raw = _ollama_chat(system, user, want_json=True, temperature=0.0, timeout=180)
+        ranking = json.loads(raw).get("ranking", [])
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(503, f"LLM rerank failed: {e}")
+    valid = {c.id for c in req.candidates}
+    order = [r for r in ranking if r.get("id") in valid]
+    seen = {r["id"] for r in order}
+    for c in req.candidates:  # any the model dropped keep their semantic order
+        if c.id not in seen:
+            order.append({"id": c.id, "reason": ""})
+    return {"order": order[: req.top_k]}
+
+
+class ChatRequest(BaseModel):
+    question: str
+    context: str
+
+
+@app.post("/chat")
+def chat(req: ChatRequest):
+    """Grounded Q&A over the device inventory (RAG — context passed in)."""
+    system = (
+        "You are the IT Ledger assistant. Answer ONLY from the device inventory "
+        "context provided. For any count or total, use the exact numbers in "
+        "FLEET STATS verbatim — never tally the device rows yourself. Use the "
+        "DEVICE SAMPLE only for name-level detail. If the answer isn't in the "
+        "context, say you don't have that data. Be concise; prefer bullet points."
+    )
+    user = f"Device inventory:\n{req.context}\n\nQuestion: {req.question}"
+    try:
+        text = _ollama_chat(system, user, temperature=0.3, timeout=240)
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(503, f"LLM unavailable: {e}")
+    return {"answer": text.strip()}

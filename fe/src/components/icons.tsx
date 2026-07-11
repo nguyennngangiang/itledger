@@ -145,6 +145,12 @@ export const ProveIcon = (p: IconProps) => (
   </Base>
 );
 
+export const CheckIcon = (p: IconProps) => (
+  <Base {...p}>
+    <path d="M20 6 9 17l-5-5" />
+  </Base>
+);
+
 export const SparklesIcon = (p: IconProps) => (
   <Base {...p}>
     <path d="M12 3l1.6 4.4L18 9l-4.4 1.6L12 15l-1.6-4.4L6 9l4.4-1.6L12 3Z" />

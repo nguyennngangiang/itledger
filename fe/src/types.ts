@@ -44,9 +44,14 @@ export const DEVICE_STATUS_ORDER: DeviceStatus[] = [
 // Fields accepted when creating a device (serial_number required, rest optional).
 export type DeviceCreate = Pick<Device, 'serial_number'> & Partial<Omit<Device, 'serial_number'>>
 
-// A device plus its semantic-search relevance score (0–1) and `document` —
-// the exact sentence the AI ranked it on, shown as the match's proof.
-export type DeviceRanked = Device & { score: number; document: string }
+// A device plus its semantic-search relevance score (0–1), `document` — the
+// exact sentence the AI ranked it on (shown as proof) — and, when the LLM
+// reranker ran, its one-line `reason` for the placement.
+export type DeviceRanked = Device & {
+  score: number
+  document: string
+  reason?: string | null
+}
 
 export type User = {
   employee_code: string

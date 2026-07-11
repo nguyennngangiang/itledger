@@ -69,14 +69,22 @@ export function SparkleBackground() {
     );
     camera.position.z = 26;
 
+    const reduceMotion = window.matchMedia(
+      "(prefers-reduced-motion: reduce)",
+    ).matches;
+    // Cap DPR at 1.5 — a full-screen additive-blended particle field at 2× is a
+    // lot of fill for an integrated GPU and barely looks different.
+    const PR = Math.min(window.devicePixelRatio, 1.5);
+
     const renderer = new THREE.WebGLRenderer({ alpha: true, antialias: true });
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    renderer.setPixelRatio(PR);
     renderer.setSize(window.innerWidth, window.innerHeight);
     renderer.setClearColor(0x000000, 0);
     mount.appendChild(renderer.domElement);
 
     // --- build the particle field ---
-    const COUNT = 900;
+    // 350 reads as dense enough full-screen; 900 was needless overdraw.
+    const COUNT = 350;
     const positions = new Float32Array(COUNT * 3);
     const colors = new Float32Array(COUNT * 3);
     const scales = new Float32Array(COUNT);
@@ -109,7 +117,7 @@ export function SparkleBackground() {
       blending: THREE.AdditiveBlending,
       uniforms: {
         uTime: { value: 0 },
-        uPixelRatio: { value: Math.min(window.devicePixelRatio, 2) },
+        uPixelRatio: { value: PR },
         uTexture: { value: makeStarTexture() },
       },
       vertexShader: /* glsl */ `
@@ -177,10 +185,27 @@ export function SparkleBackground() {
       renderer.render(scene, camera);
       raf = requestAnimationFrame(tick);
     };
-    tick();
+
+    // Stop the loop entirely when the tab is hidden — no point burning GPU/CPU
+    // on a canvas nobody can see. And with reduced-motion, draw one static frame.
+    const onVisibility = () => {
+      if (document.hidden) {
+        cancelAnimationFrame(raf);
+        raf = 0;
+      } else if (!raf) {
+        raf = requestAnimationFrame(tick);
+      }
+    };
+    if (reduceMotion) {
+      renderer.render(scene, camera);
+    } else {
+      tick();
+      document.addEventListener("visibilitychange", onVisibility);
+    }
 
     return () => {
       cancelAnimationFrame(raf);
+      document.removeEventListener("visibilitychange", onVisibility);
       window.removeEventListener("pointermove", onPointer);
       window.removeEventListener("resize", onResize);
       geo.dispose();

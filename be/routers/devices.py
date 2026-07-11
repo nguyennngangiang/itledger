@@ -13,6 +13,7 @@ from ..config import settings
 from ..db import get_pool
 from ..models.device import DeviceCreate, DeviceOut, DeviceUpdate, DeviceDelete
 from ..repositories import device as repo
+from ..repositories import feedback as feedback_repo
 from ..repositories import maintenance as maint_repo
 from ..repositories import user as user_repo
 from ..repositories.errors import DuplicateError, ForeignKeyError
@@ -32,10 +33,12 @@ class ImportResult(BaseModel):
 
 
 class DeviceRanked(DeviceOut):
-    """A device plus its semantic-similarity score (0–1) and the exact
-    sentence the AI ranked it on (`document`) — shown as the match's proof."""
+    """A device plus its semantic-similarity score (0–1), the exact sentence the
+    AI ranked it on (`document`, shown as proof), and — when the LLM reranker
+    ran — its one-line `reason` for the placement."""
     score: float
     document: str
+    reason: str | None = None
 
 
 def _age_phrase(buy_date) -> str | None:
@@ -156,11 +159,71 @@ async def filter_devices(field: str, value: str, pool=Depends(get_pool)):
     return await repo.filter_devices(pool, field, value)
 
 
+async def _llm_rerank(pool, q: str, results: list[dict]) -> list[dict]:
+    """Re-sort the semantic top-K with the local LLM, seeded with the user's
+    marked-correct examples as few-shot anchors. Falls back to the semantic
+    order if the LLM is unavailable, so search never hard-fails on it."""
+    examples = await feedback_repo.examples_for_query(pool, q)
+    payload = {
+        "query": q,
+        "candidates": [
+            {"id": r["serial_number"], "text": r["document"]} for r in results
+        ],
+        "examples": [
+            {"query": e["query"], "document": e["document"]} for e in examples
+        ],
+        "top_k": len(results),
+    }
+    try:
+        async with httpx.AsyncClient(timeout=180) as client:
+            resp = await client.post(f"{settings.ai_url}/rerank", json=payload)
+            resp.raise_for_status()
+            order = resp.json().get("order", [])
+    except httpx.HTTPError:
+        return results
+
+    by_serial = {r["serial_number"]: r for r in results}
+    reordered: list[dict] = []
+    for o in order:
+        r = by_serial.get(o.get("id"))
+        if r:
+            reordered.append({**r, "reason": o.get("reason") or None})
+    seen = {r["serial_number"] for r in reordered}
+    reordered.extend(r for r in results if r["serial_number"] not in seen)
+    return reordered
+
+
+class ExplainRequest(BaseModel):
+    query: str
+    document: str
+
+
+class ExplainResult(BaseModel):
+    explanation: str
+
+
+@router.post("/explain", response_model=ExplainResult)
+async def explain_match(req: ExplainRequest):
+    """LLM one-liner explaining why a device matched — powers the proof card."""
+    try:
+        async with httpx.AsyncClient(timeout=90) as client:
+            resp = await client.post(
+                f"{settings.ai_url}/explain", json=req.model_dump()
+            )
+            resp.raise_for_status()
+            return resp.json()
+    except httpx.HTTPError as e:
+        raise HTTPException(503, f"LLM explain unavailable: {e}")
+
+
 @router.get("/semantic-search", response_model=list[DeviceRanked])
-async def semantic_search(q: str, limit: int = 20, pool=Depends(get_pool)):
+async def semantic_search(
+    q: str, limit: int = 20, rerank: bool = False, pool=Depends(get_pool)
+):
     """Rank active devices by how well they match a natural-language query,
-    using the local embedding service. Declared before /{serial_number} so
-    "semantic-search" isn't read as a serial number."""
+    using the local embedding service. With `rerank=true` the local LLM re-sorts
+    the results (learning from marked feedback). Declared before /{serial_number}
+    so "semantic-search" isn't read as a serial number."""
     devices = await repo.list_devices(pool)
     if not devices:
         return []
@@ -192,7 +255,7 @@ async def semantic_search(q: str, limit: int = 20, pool=Depends(get_pool)):
         raise HTTPException(503, f"AI search service unavailable: {e}")
 
     by_id = {d["serial_number"]: d for d in devices}
-    return [
+    results = [
         {
             **by_id[r["id"]],
             "score": round(r["score"], 4),
@@ -201,6 +264,11 @@ async def semantic_search(q: str, limit: int = 20, pool=Depends(get_pool)):
         for r in ranked
         if r["id"] in by_id
     ]
+
+    if rerank and results:
+        results = await _llm_rerank(pool, q, results)
+
+    return results
 
 @router.get("/{serial_number}", response_model=DeviceOut)
 async def get_device(serial_number: str, pool=Depends(get_pool)):

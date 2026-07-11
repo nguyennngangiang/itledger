@@ -18,6 +18,9 @@ if (-not (Test-Path $py)) {
 # Model files (bge-small-en-v1.5 ONNX + tokenizer) live in ai\.models.
 $env:MODEL_DIR     = Join-Path $aiDir ".models"
 $env:EMBED_DEVICES = "NPU,GPU,CPU"   # first device that can run the model wins
+# Local generative LLM (Ollama) this service proxies for rerank / explain / ask.
+if (-not $env:OLLAMA_URL)   { $env:OLLAMA_URL   = "http://localhost:11434" }
+if (-not $env:OLLAMA_MODEL) { $env:OLLAMA_MODEL = "qwen2.5:7b" }
 
 Set-Location $repoRoot
 Write-Host "Starting embedding service on http://localhost:8001 (devices: $env:EMBED_DEVICES)"
