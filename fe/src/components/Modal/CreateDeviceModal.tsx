@@ -1,8 +1,11 @@
-import { useState } from "react";
-import { Button, Input } from "antd";
-import { createDevice } from "../../api/devices";
+import { useEffect, useState } from "react";
+import { Button, Input, Select, AutoComplete, DatePicker } from "antd";
+import dayjs from "dayjs";
+import { createDevice, updateDevice } from "../../api/devices";
+import { listUsers } from "../../api/users";
 import { ApiError } from "../../api/client";
-import type { DeviceCreate } from "../../types";
+import type { Device, DeviceCreate, DeviceStatus, User } from "../../types";
+import { GHOST_USER_CODE, DEVICE_STATUS_ORDER, DEVICE_STATUS_META } from "../../types";
 import { Modal } from "./Modal";
 
 function emptyToNull(value: string): string | null {
@@ -10,17 +13,24 @@ function emptyToNull(value: string): string | null {
   return trimmed === "" ? null : trimmed;
 }
 
-const FIELDS: {
-  key: keyof typeof INITIAL;
+// Preset suggestions for the dropdowns (free text still allowed).
+const RAM_OPTS = ["8 GB", "16 GB", "32 GB", "64 GB"];
+const OS_OPTS = ["Windows 11 Pro", "Windows 10 Pro", "macOS Sonoma", "Ubuntu 22.04"];
+const OFFICE_OPTS = ["Office 365", "Office 2021", "Office 2019", "None"];
+const AUTO: Record<string, string[]> = {
+  ram: RAM_OPTS,
+  os: OS_OPTS,
+  msoffice: OFFICE_OPTS,
+};
+
+const SPEC_FIELDS: {
+  key: keyof FormState;
   label: string;
   placeholder?: string;
-  required?: boolean;
   type?: string;
   full?: boolean;
 }[] = [
-  { key: "serial_number", label: "Serial Number", placeholder: "SN123456789", required: true },
   { key: "barcode", label: "Barcode", placeholder: "8239498234" },
-  { key: "name", label: "Device Name", placeholder: "Dell Latitude 5420" },
   { key: "type", label: "Type", placeholder: "Laptop" },
   { key: "brand", label: "Brand", placeholder: "Dell" },
   { key: "cpu", label: "CPU", placeholder: "Intel Core i5" },
@@ -31,7 +41,23 @@ const FIELDS: {
   { key: "buy_date", label: "Buy Date", type: "date", full: true },
 ];
 
-const INITIAL = {
+type FormState = {
+  serial_number: string;
+  barcode: string;
+  type: string;
+  brand: string;
+  cpu: string;
+  ram: string;
+  storage: string;
+  os: string;
+  msoffice: string;
+  buy_date: string;
+  name: string;
+  user_id: string;
+  status: DeviceStatus;
+};
+
+const EMPTY: FormState = {
   serial_number: "",
   barcode: "",
   type: "",
@@ -43,72 +69,206 @@ const INITIAL = {
   msoffice: "",
   buy_date: "",
   name: "",
+  user_id: GHOST_USER_CODE,
+  status: "in_stock",
 };
 
-export function CreateDeviceModal({ onClose }: { onClose: () => void }) {
+export function CreateDeviceModal({
+  onClose,
+  isEdit = false,
+  device,
+}: {
+  onClose: () => void;
+  isEdit?: boolean;
+  device?: Device;
+}) {
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
-  const [deviceData, setDeviceData] = useState({ ...INITIAL });
+  const [users, setUsers] = useState<User[]>([]);
+  const [form, setForm] = useState<FormState>(EMPTY);
+
+  useEffect(() => {
+    listUsers()
+      .then(setUsers)
+      .catch(() => setUsers([]));
+  }, []);
+
+  useEffect(() => {
+    if (isEdit && device) {
+      setForm({
+        serial_number: device.serial_number,
+        barcode: device.barcode ?? "",
+        type: device.type ?? "",
+        brand: device.brand ?? "",
+        cpu: device.cpu ?? "",
+        ram: device.ram ?? "",
+        storage: device.storage ?? "",
+        os: device.os ?? "",
+        msoffice: device.msoffice ?? "",
+        buy_date: device.buy_date ?? "",
+        name: device.name ?? "",
+        user_id: device.user_id ?? GHOST_USER_CODE,
+        status: (device.status as DeviceStatus) ?? "in_stock",
+      });
+    }
+  }, [isEdit, device]);
+
+  const set = (key: keyof FormState, value: string) =>
+    setForm((prev) => ({ ...prev, [key]: value }));
+
+  // When the owner changes and status is still a derivable value, re-derive it.
+  const setOwner = (userId: string) =>
+    setForm((prev) => {
+      const derivable = prev.status === "active" || prev.status === "in_stock";
+      const derived = userId === GHOST_USER_CODE ? "in_stock" : "active";
+      return { ...prev, user_id: userId, status: derivable ? derived : prev.status };
+    });
 
   const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
     setError(null);
     setSubmitting(true);
 
-    const device: DeviceCreate = {
-      serial_number: deviceData.serial_number.trim(),
-      barcode: emptyToNull(deviceData.barcode),
-      type: emptyToNull(deviceData.type),
-      brand: emptyToNull(deviceData.brand),
-      cpu: emptyToNull(deviceData.cpu),
-      ram: emptyToNull(deviceData.ram),
-      storage: emptyToNull(deviceData.storage),
-      os: emptyToNull(deviceData.os),
-      msoffice: emptyToNull(deviceData.msoffice),
-      buy_date: emptyToNull(deviceData.buy_date),
-      name: emptyToNull(deviceData.name),
+    const payload: DeviceCreate = {
+      serial_number: form.serial_number.trim(),
+      barcode: emptyToNull(form.barcode),
+      type: emptyToNull(form.type),
+      brand: emptyToNull(form.brand),
+      cpu: emptyToNull(form.cpu),
+      ram: emptyToNull(form.ram),
+      storage: emptyToNull(form.storage),
+      os: emptyToNull(form.os),
+      msoffice: emptyToNull(form.msoffice),
+      buy_date: emptyToNull(form.buy_date),
+      name: emptyToNull(form.name),
+      user_id: form.user_id || GHOST_USER_CODE,
+      status: form.status,
     };
 
     try {
-      await createDevice(device);
+      if (isEdit) {
+        const { serial_number, ...patch } = payload;
+        await updateDevice(serial_number, patch);
+      } else {
+        await createDevice(payload);
+      }
       onClose();
     } catch (err) {
       setError(
-        err instanceof ApiError
-          ? String(err.message)
-          : "Failed to create device",
+        err instanceof ApiError ? String(err.message) : "Failed to save device",
       );
     } finally {
       setSubmitting(false);
     }
   };
 
-  const handleInputChange = (field: keyof typeof INITIAL, value: string) => {
-    setDeviceData((prev) => ({ ...prev, [field]: value }));
-  };
+  const userOptions = users.map((u) => ({
+    value: u.employee_code,
+    label:
+      u.employee_code === GHOST_USER_CODE
+        ? "IT Store — in stock (IT)"
+        : `${u.name ?? u.employee_code} — ${u.team ?? "—"}`,
+  }));
+
+  const statusOptions = DEVICE_STATUS_ORDER.map((s) => ({
+    value: s,
+    label: DEVICE_STATUS_META[s].label,
+  }));
 
   return (
-    <Modal title="Create Device" onClose={onClose}>
+    <Modal title={isEdit ? "Edit Device" : "Create Device"} onClose={onClose}>
       <form className="modal-form" onSubmit={handleSubmit}>
         <div className="form-grid">
-          {FIELDS.map((f) => (
-            <label
-              key={f.key}
-              className={`form-field${f.full ? " form-field-full" : ""}`}
-            >
-              <span>
-                {f.label}
-                {f.required && <span className="req">*</span>}
-              </span>
-              <Input
-                type={f.type}
-                value={deviceData[f.key]}
-                required={f.required}
-                placeholder={f.placeholder}
-                onChange={(e) => handleInputChange(f.key, e.target.value)}
-              />
-            </label>
-          ))}
+          <label className="form-field">
+            <span>
+              Serial Number<span className="req">*</span>
+            </span>
+            <Input
+              value={form.serial_number}
+              required
+              disabled={isEdit}
+              placeholder="SN123456789"
+              onChange={(e) => set("serial_number", e.target.value)}
+            />
+          </label>
+
+          <label className="form-field">
+            <span>Device Name</span>
+            <Input
+              value={form.name}
+              placeholder="Dell Latitude 5420"
+              onChange={(e) => set("name", e.target.value)}
+            />
+          </label>
+
+          <label className="form-field">
+            <span>Owner</span>
+            <Select
+              showSearch
+              optionFilterProp="label"
+              value={form.user_id}
+              onChange={setOwner}
+              options={userOptions}
+            />
+          </label>
+
+          <label className="form-field">
+            <span>Status</span>
+            <Select
+              value={form.status}
+              onChange={(v) => set("status", v)}
+              options={statusOptions}
+            />
+          </label>
+
+          {SPEC_FIELDS.map((f) => {
+            let control: React.ReactNode;
+            if (f.key === "buy_date") {
+              control = (
+                <DatePicker
+                  style={{ width: "100%" }}
+                  format="DD-MM-YYYY"
+                  placeholder="DD-MM-YYYY"
+                  value={form.buy_date ? dayjs(form.buy_date) : null}
+                  onChange={(d) =>
+                    set("buy_date", d ? d.format("YYYY-MM-DD") : "")
+                  }
+                />
+              );
+            } else if (f.key in AUTO) {
+              control = (
+                <AutoComplete
+                  style={{ width: "100%" }}
+                  options={AUTO[f.key].map((v) => ({ value: v }))}
+                  value={form[f.key]}
+                  placeholder={f.placeholder}
+                  filterOption={(input, opt) =>
+                    String(opt?.value ?? "")
+                      .toLowerCase()
+                      .includes(input.toLowerCase())
+                  }
+                  onChange={(v) => set(f.key, v)}
+                />
+              );
+            } else {
+              control = (
+                <Input
+                  value={form[f.key]}
+                  placeholder={f.placeholder}
+                  onChange={(e) => set(f.key, e.target.value)}
+                />
+              );
+            }
+            return (
+              <label
+                key={f.key}
+                className={`form-field${f.full ? " form-field-full" : ""}`}
+              >
+                <span>{f.label}</span>
+                {control}
+              </label>
+            );
+          })}
         </div>
 
         {error && <p className="form-error">{error}</p>}
@@ -118,7 +278,7 @@ export function CreateDeviceModal({ onClose }: { onClose: () => void }) {
             Cancel
           </Button>
           <Button type="primary" htmlType="submit" loading={submitting}>
-            Create Device
+            {isEdit ? "Save changes" : "Create Device"}
           </Button>
         </div>
       </form>

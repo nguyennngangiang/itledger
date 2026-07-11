@@ -12,12 +12,12 @@ createRoot(document.getElementById("root")!).render(
     <ConfigProvider
       theme={{
         token: {
-          colorPrimary: "#4f46e5",
-          colorInfo: "#4f46e5",
+          colorPrimary: "#7c74e8",
+          colorInfo: "#7c74e8",
           colorSuccess: "#16a34a",
           colorWarning: "#d97706",
-          colorError: "#dc2626",
-          colorTextBase: "#0f172a",
+          colorError: "#e05252",
+          colorTextBase: "#2b2740",
           borderRadius: 10,
           fontFamily:
             "'Inter', system-ui, 'Segoe UI', Roboto, sans-serif",
@@ -25,11 +25,11 @@ createRoot(document.getElementById("root")!).render(
         },
         components: {
           Table: {
-            headerBg: "#f8fafc",
-            headerColor: "#475569",
+            headerBg: "#f3f1fc",
+            headerColor: "#6b6785",
             headerSplitColor: "transparent",
-            rowHoverBg: "#f5f3ff",
-            borderColor: "#eef2f7",
+            rowHoverBg: "#f6f4fe",
+            borderColor: "#f0edf8",
             cellPaddingBlock: 14,
           },
           Button: {

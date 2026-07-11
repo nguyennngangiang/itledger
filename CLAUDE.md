@@ -1,0 +1,99 @@
+# IT Ledger
+
+Internal web app for tracking company IT hardware: a **device inventory** with
+**owners**, plus **maintenance** and **handover** history, and a **dashboard**
+of fleet stats. FastAPI + PostgreSQL backend, React + Vite frontend.
+
+## Layout
+
+```
+be/                 FastAPI backend (Python 3.12, asyncpg)
+  main.py           App entry: lifespan (DB pool), CORS, router wiring, /health
+  config.py         Settings from env (DATABASE_URL, CORS_ORIGINS, AI_URL) via be/.env
+  db.py             Global asyncpg pool + get_pool() dependency
+  models/           Pydantic schemas (Create / Update / Out / Delete) per resource
+  repositories/     ALL SQL lives here (one module per resource) + errors.py
+  routers/          Thin HTTP layer — parse, call repo, map errors to status codes
+  sql/schema.sql    Table DDL (run once by Postgres on first container start)
+  seed.py           Idempotent sample-data seeder
+  docker-compose.yml  Postgres + API + AI containers
+
+ai/                 Local semantic-search embedding service (runs on the HOST)
+  main.py           FastAPI: POST /rank; OpenVINO on the Intel NPU (GPU/CPU fallback)
+  run-host.ps1      Launcher: creates the .venv and starts uvicorn on :8001
+  requirements-host.txt  openvino + tokenizers + fastapi (Python 3.12)
+  .models/          bge-small-en-v1.5 ONNX + tokenizer (gitignored)
+  .venv/            Python 3.12 venv (gitignored)
+
+fe/                 React 19 + Vite 8 + TypeScript, Ant Design 6, Tailwind 4
+  src/api/          One module per resource; all fetches go through client.ts
+  src/components/   Screens (DeviceMainScreen, MaintenanceScreen, …) + Modal/
+  src/lib/          format.ts, usePagedList.ts (server-side table hook), sparkle.ts (anime.js)
+  src/types.ts      TS types mirroring the backend snake_case JSON
+```
+
+## Run it
+
+**Backend + DB (Docker):** from `be/`, `docker compose up`. Postgres listens on
+`5432`, the API on `8000` (`/docs` for Swagger). The API container hot-reloads
+via the mounted repo. `schema.sql` only runs on a fresh volume — after schema
+edits, recreate: `docker compose down -v && docker compose up`.
+
+**Seed sample data:** `python -m be.seed` (needs `DATABASE_URL`, or run inside
+the api container). Idempotent.
+
+**AI service (host, NPU):** runs on the Windows host — NOT in Docker — so it can
+use the Intel NPU (containers can't reach it). Start it with
+`powershell -ExecutionPolicy Bypass -File ai\run-host.ps1` (serves `:8001`,
+`/health` reports the bound `device`). It compiles the model with OpenVINO,
+preferring **NPU → GPU → CPU** (`EMBED_DEVICES`); the NPU needs the static
+[1, 128] reshape done in `main.py`. Model files live in `ai/.models` (already
+present; a fresh machine can copy them from a teammate or re-download the
+`qdrant/bge-small-en-v1.5-onnx-q` repo). The Docker `api` reaches it via
+`AI_URL=http://host.docker.internal:8001`.
+
+**Frontend (Vite dev server):** from `fe/`, `npm install` then `npm run dev`
+(http://localhost:5173). It calls the API at `VITE_API_URL` (default
+`http://localhost:8000`). `npm run build` type-checks (`tsc -b`) then builds;
+run it to verify TS changes. `npm run lint` for ESLint.
+
+## Conventions
+
+- **Router stays thin; SQL only in `repositories/`.** Never string-format user
+  values into SQL — use asyncpg `$1, $2` placeholders. `ORDER BY` / filter
+  columns are allow-listed (see `SORTABLE_FIELDS` / `FILTERABLE_FIELDS`).
+- **Soft delete / trash.** `delete` sets `deleted_at`; `restore` clears it;
+  `purge` (or `?permanent=true`) hard-deletes. List endpoints take `deleted`
+  to switch between active rows and the trash.
+- **Bulk delete.** Each resource exposes `DELETE /<resource>/batch` (id list in
+  the body, `?permanent=`). Declared before `/{id}` so "batch" isn't read as an
+  id. Frontend: `delete*Batch()` in `src/api/`, driven by the shared
+  `BulkDeleteBar` + table `rowSelection`.
+- **Import.** `POST /devices/import` bulk-inserts parsed rows and skips existing
+  serials (`ON CONFLICT DO NOTHING`) so re-imports are idempotent. The Import
+  button parses xlsx/csv client-side with `xlsx` (`ImportDevicesModal`); columns
+  are matched to fields by normalized header name.
+- **Paginated tables.** `GET /<resource>/page` returns `{rows, total}`; the
+  `usePagedList` hook drives an Ant `<Table>` (sort/search/paginate/trash).
+- **Semantic search.** `GET /devices/semantic-search?q=` flattens each active
+  device into a sentence (specs, owner team, repair count), calls the `ai`
+  service `/rank`, and returns devices with a `score`. The Devices screen's
+  "Smart" toggle renders the ranked results with a relevance meter. It's local
+  and offline — no external API. The embedder runs on the host via OpenVINO and
+  binds to the **Intel NPU** (see the AI service note above); the Docker API
+  calls it at `host.docker.internal:8001`.
+- **Owners.** Ownerless / in-stock devices belong to the ghost `IT-STORE` user
+  (`GHOST_USER_CODE`). `resolveOwner` in `lib/format.ts` handles display.
+- **Animation (anime.js).** `lib/sparkle.ts` owns motion: click sparkle bursts,
+  staggered entrances, springy button-press feedback, and the sliding nav
+  indicator. Charts (chart.js) animate on mount. Respect
+  `prefers-reduced-motion`.
+- **API shape.** JSON is snake_case both ways; `client.ts` centralizes the base
+  URL, JSON handling, and `ApiError` (FastAPI's `detail`). Keep `types.ts` in
+  sync with the Pydantic models.
+
+## Notes
+
+- Root-level `REAL-DATA.xlsx`, `import_data.json`, `_build_import.mjs`, and
+  `be/import_real.py` are one-off scaffolding used to bootstrap real data; the
+  in-app Import button supersedes them for normal use. Data files are gitignored.

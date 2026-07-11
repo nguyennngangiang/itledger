@@ -19,6 +19,8 @@ class Settings:
     cors_origins: list[str] = os.getenv(
         "CORS_ORIGINS", "http://localhost:5173"
     ).split(",")
+    # Local semantic-search embedding service (see ai/main.py).
+    ai_url: str = os.getenv("AI_URL", "http://localhost:8001")
 
 
 settings = Settings()

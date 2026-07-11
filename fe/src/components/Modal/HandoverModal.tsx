@@ -1,10 +1,10 @@
 import { useEffect, useState } from "react";
 import { Button, Input, Select } from "antd";
 import { listDevices } from "../../api/devices";
-import { createHandover } from "../../api/handovers";
+import { createHandover, updateHandover } from "../../api/handovers";
 import { listUsers } from "../../api/users";
 import { ApiError } from "../../api/client";
-import type { Device, HandoverCreate, User } from "../../types";
+import type { Device, Handover, HandoverCreate, User } from "../../types";
 import { Modal } from "./Modal";
 
 function emptyToNull(value: string): string | null {
@@ -16,7 +16,15 @@ function todayIsoDate(): string {
   return new Date().toISOString().slice(0, 10);
 }
 
-function HandoverModal({ onClose }: { onClose: () => void }) {
+function HandoverModal({
+  onClose,
+  isEdit = false,
+  handover,
+}: {
+  onClose: () => void;
+  isEdit?: boolean;
+  handover?: Handover;
+}) {
   const [serialNumber, setSerialNumber] = useState("");
   const [fromEmployeeCode, setFromEmployeeCode] = useState("");
   const [toEmployeeCode, setToEmployeeCode] = useState("");
@@ -44,6 +52,16 @@ function HandoverModal({ onClose }: { onClose: () => void }) {
       .finally(() => setLoading(false));
   }, []);
 
+  // Prefill when editing an existing handover.
+  useEffect(() => {
+    if (isEdit && handover) {
+      setSerialNumber(handover.device_id ?? "");
+      setFromEmployeeCode(handover.from_user_id ?? "");
+      setToEmployeeCode(handover.to_user_id ?? "");
+      setReason(handover.reason ?? "");
+    }
+  }, [isEdit, handover]);
+
   const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
     setError(null);
@@ -55,17 +73,28 @@ function HandoverModal({ onClose }: { onClose: () => void }) {
 
     setSubmitting(true);
 
-    const handover: HandoverCreate = {
-      handover_id: crypto.randomUUID(),
-      handover_date: todayIsoDate(),
-      device_id: serialNumber,
-      from_user_id: fromEmployeeCode,
-      to_user_id: toEmployeeCode,
-      reason: emptyToNull(reason),
-    };
-
     try {
-      await createHandover(handover);
+      if (isEdit && handover) {
+        await updateHandover(handover.handover_id, {
+          device_id: serialNumber,
+          from_user_id: fromEmployeeCode,
+          to_user_id: toEmployeeCode,
+          reason: emptyToNull(reason),
+        });
+        onClose();
+        return;
+      }
+
+      const record: HandoverCreate = {
+        handover_id: crypto.randomUUID(),
+        handover_date: todayIsoDate(),
+        device_id: serialNumber,
+        from_user_id: fromEmployeeCode,
+        to_user_id: toEmployeeCode,
+        reason: emptyToNull(reason),
+      };
+
+      await createHandover(record);
       onClose();
     } catch (err) {
       setError(
@@ -92,7 +121,7 @@ function HandoverModal({ onClose }: { onClose: () => void }) {
   }));
 
   return (
-    <Modal title="Record Handover" onClose={onClose}>
+    <Modal title={isEdit ? "Edit Handover" : "Record Handover"} onClose={onClose}>
       <form className="modal-form" onSubmit={handleSubmit}>
         <div className="form-grid">
           <label className="form-field form-field-full">
@@ -164,7 +193,7 @@ function HandoverModal({ onClose }: { onClose: () => void }) {
             loading={submitting}
             disabled={loading || !!loadError}
           >
-            Submit
+            {isEdit ? "Save changes" : "Submit"}
           </Button>
         </div>
       </form>

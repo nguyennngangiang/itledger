@@ -1,101 +1,237 @@
 import { useEffect, useState } from "react";
-import { Table, Button } from "antd";
+import { Table, Button, Input, Popover } from "antd";
 import type { TableColumnsType } from "antd";
-import { listMaintenance } from "../api/maintenance";
-import type { Maintenance } from "../types";
-import { useLoading } from "../hook/LoadingContext";
+import { toast } from "react-toastify";
+import {
+  pageMaintenance,
+  deleteMaintenance,
+  deleteMaintenanceBatch,
+  restoreMaintenance,
+} from "../api/maintenance";
+import { listDevices } from "../api/devices";
+import { listUsers } from "../api/users";
+import type { Maintenance, Device, User } from "../types";
+import { ConfirmModal } from "./Modal/ConfirmModal";
+import { BulkDeleteBar } from "./BulkDeleteBar";
+import { TrashToggle } from "./TrashToggle";
 import MaintenanceModal from "./Modal/MaintenanceModal";
-import { PlusIcon, RefreshIcon } from "./icons";
+import { PlusIcon, RefreshIcon, SearchIcon, InfoIcon, TrashIcon, EditIcon } from "./icons";
+import { formatDate, resolveOwner, toUserMap } from "../lib/format";
+import { usePagedList } from "../lib/usePagedList";
+import { TABLE_SCROLL } from "../lib/table";
 
-export const MaintenanceScreen = () => {
-  const [records, setRecords] = useState<Maintenance[]>([]);
-  const [isCreateOpen, setIsCreateOpen] = useState(false);
-  const { startLoading, endLoading } = useLoading();
+export const MaintenanceScreen = ({
+  refreshKey = 0,
+  onAdd,
+}: {
+  refreshKey?: number;
+  onAdd?: () => void;
+}) => {
+  const [devices, setDevices] = useState<Record<string, Device>>({});
+  const [users, setUsers] = useState<Record<string, User>>({});
+  const [searchText, setSearchText] = useState("");
+  const [deleteTarget, setDeleteTarget] = useState<Maintenance | null>(null);
+  const [editTarget, setEditTarget] = useState<Maintenance | null>(null);
+  const [selectedKeys, setSelectedKeys] = useState<string[]>([]);
+  const [bulkConfirm, setBulkConfirm] = useState(false);
 
-  const load = async () => {
-    startLoading();
+  const list = usePagedList<Maintenance>(pageMaintenance, {
+    defaultOrderBy: "maintenance_date",
+    defaultOrder: "desc",
+    refreshKey,
+  });
+
+  useEffect(() => setSelectedKeys([]), [list.trashed]);
+
+  const handleBulkDelete = async () => {
+    setBulkConfirm(false);
     try {
-      setRecords(await listMaintenance());
-    } catch (err) {
-      console.error(err);
+      await deleteMaintenanceBatch(selectedKeys, list.trashed);
+      toast.success(
+        `${selectedKeys.length} record(s) ${
+          list.trashed ? "permanently deleted" : "moved to trash"
+        }`,
+      );
+      setSelectedKeys([]);
+    } catch (e) {
+      toast.error("Failed: " + e);
     } finally {
-      setTimeout(() => endLoading(), 600);
+      list.reload();
     }
   };
 
   useEffect(() => {
-    load();
+    Promise.all([listDevices(), listUsers()])
+      .then(([ds, us]) => {
+        setDevices(Object.fromEntries(ds.map((d) => [d.serial_number, d])));
+        setUsers(toUserMap(us));
+      })
+      .catch(() => {});
   }, []);
 
+  const handleDelete = async (id: string, permanent: boolean) => {
+    setDeleteTarget(null);
+    try {
+      await deleteMaintenance(id, permanent);
+      toast.success(permanent ? "Permanently deleted" : "Moved to trash");
+    } catch (e) {
+      toast.error("Failed: " + e);
+    } finally {
+      list.reload();
+    }
+  };
+
+  const handleRestore = async (id: string) => {
+    try {
+      await restoreMaintenance(id);
+      toast.success("Restored");
+    } catch (e) {
+      toast.error("Failed: " + e);
+    } finally {
+      list.reload();
+    }
+  };
+
   const dash = <span className="text-faint">—</span>;
+
+  const detailBubble = (m: Maintenance) => {
+    const rows: [string, string | number | null][] = [
+      ["Problem", m.reason],
+      ["Solution", m.solution],
+      ["Result", m.result],
+      ["Cost (VND)", m.cost_vnd != null ? m.cost_vnd.toLocaleString("vi-VN") : null],
+      ["Remarks", m.remarks],
+    ];
+    return (
+      <dl className="detail-bubble">
+        {rows.map(([k, v]) => (
+          <div key={k} style={{ display: "contents" }}>
+            <dt>{k}</dt>
+            <dd>{v != null && v !== "" ? v : "—"}</dd>
+          </div>
+        ))}
+      </dl>
+    );
+  };
 
   const columns: TableColumnsType<Maintenance> = [
     {
       title: "Date",
       dataIndex: "maintenance_date",
       key: "maintenance_date",
-      render: (v) => v ?? dash,
+      sorter: true,
+      render: (v) => (v ? formatDate(v) : dash),
     },
     {
       title: "Device",
       dataIndex: "device_id",
       key: "device_id",
-      render: (v) => (v ? <span style={{ fontWeight: 600 }}>{v}</span> : dash),
+      sorter: true,
+      render: (id: string | null) => (
+        <span style={{ fontWeight: 600 }}>
+          {(id && devices[id]?.name) || id || "—"}
+        </span>
+      ),
+    },
+    {
+      title: "Owner",
+      key: "owner",
+      render: (_, m) => {
+        const d = m.device_id ? devices[m.device_id] : undefined;
+        const o = resolveOwner(d?.user_id ?? null, users);
+        return <span style={{ fontWeight: 500 }}>{o.name}</span>;
+      },
     },
     {
       title: "Team",
-      dataIndex: "team",
       key: "team",
-      render: (v) => (v ? <span className="pill pill-accent">{v}</span> : dash),
-    },
-    { title: "Part", dataIndex: "part", key: "part", render: (v) => v ?? dash },
-    {
-      title: "Problem",
-      dataIndex: "reason",
-      key: "reason",
-      render: (v) => v ?? dash,
-    },
-    {
-      title: "Solution",
-      dataIndex: "solution",
-      key: "solution",
-      render: (v) => v ?? dash,
+      // Team always follows the device owner's current team, not the value
+      // that happened to be stored on the maintenance record.
+      render: (_, m) => {
+        const d = m.device_id ? devices[m.device_id] : undefined;
+        const team = resolveOwner(d?.user_id ?? null, users).team;
+        return team && team !== "—" ? (
+          <span className="pill pill-accent">{team}</span>
+        ) : (
+          dash
+        );
+      },
     },
     {
-      title: "Result",
-      dataIndex: "result",
-      key: "result",
-      render: (v) => v ?? dash,
+      title: "Part",
+      dataIndex: "part",
+      key: "part",
+      sorter: true,
+      render: (v) => (v ? <span className="pill pill-neutral">{v}</span> : dash),
     },
     {
-      title: "Cost (VND)",
-      dataIndex: "cost_vnd",
-      key: "cost_vnd",
-      align: "right",
-      render: (v: number | null) =>
-        v != null ? v.toLocaleString("vi-VN") : dash,
-    },
-    {
-      title: "Remarks",
-      dataIndex: "remarks",
-      key: "remarks",
-      render: (v) => v ?? dash,
+      title: "",
+      key: "options",
+      width: 160,
+      render: (_, m) =>
+        list.trashed ? (
+          <div className="flex items-center gap-1">
+            <Button size="small" onClick={() => handleRestore(m.maintenance_id)}>
+              Restore
+            </Button>
+            <Button
+              type="text"
+              danger
+              icon={<TrashIcon size={18} />}
+              onClick={() => setDeleteTarget(m)}
+            />
+          </div>
+        ) : (
+          <div className="flex items-center gap-1">
+            <Popover
+              title="Repair details"
+              content={detailBubble(m)}
+              trigger="hover"
+              placement="left"
+            >
+              <span className="info-trigger">
+                <InfoIcon size={18} />
+              </span>
+            </Popover>
+            <Button
+              type="text"
+              icon={<EditIcon size={18} />}
+              onClick={() => setEditTarget(m)}
+            />
+            <Button
+              type="text"
+              danger
+              icon={<TrashIcon size={18} />}
+              onClick={() => setDeleteTarget(m)}
+            />
+          </div>
+        ),
     },
   ];
 
   return (
     <>
       <div className="screen-toolbar">
-        <div />
+        <div className="screen-search">
+          <Input
+            allowClear
+            prefix={<SearchIcon size={16} />}
+            placeholder="Search maintenance… (Enter)"
+            style={{ width: 300 }}
+            value={searchText}
+            onChange={(e) => {
+              setSearchText(e.target.value);
+              if (e.target.value === "") list.applySearch("");
+            }}
+            onPressEnter={() => list.applySearch(searchText)}
+          />
+        </div>
         <div className="toolbar-actions">
-          <Button icon={<RefreshIcon size={16} />} onClick={load}>
+          <TrashToggle trashed={list.trashed} onToggle={list.toggleTrash} />
+          <Button icon={<RefreshIcon size={16} />} onClick={list.reload}>
             Refresh
           </Button>
-          <Button
-            type="primary"
-            icon={<PlusIcon size={16} />}
-            onClick={() => setIsCreateOpen(true)}
-          >
+          <Button type="primary" icon={<PlusIcon size={16} />} onClick={onAdd}>
             Log Maintenance
           </Button>
         </div>
@@ -103,26 +239,68 @@ export const MaintenanceScreen = () => {
 
       <div className="panel">
         <div className="panel-head">
-          <span className="panel-title">Maintenance records</span>
-          <span className="panel-count">{records.length} records</span>
+          <span className="panel-title">
+            {list.trashed ? "Trash" : "Maintenance records"}
+          </span>
+          {selectedKeys.length > 0 ? (
+            <BulkDeleteBar
+              count={selectedKeys.length}
+              trashed={list.trashed}
+              onDelete={() => setBulkConfirm(true)}
+              onClear={() => setSelectedKeys([])}
+            />
+          ) : (
+            <span className="panel-count">{list.total} total</span>
+          )}
         </div>
         <div className="table-wrap">
           <Table<Maintenance>
             rowKey="maintenance_id"
-            dataSource={records}
             columns={columns}
-            pagination={false}
-            scroll={{ x: "max-content" }}
+            scroll={TABLE_SCROLL}
+            rowSelection={{
+              selectedRowKeys: selectedKeys,
+              onChange: (keys) => setSelectedKeys(keys as string[]),
+            }}
+            {...list.tableProps}
           />
         </div>
       </div>
 
-      {isCreateOpen && (
+      {editTarget && (
         <MaintenanceModal
+          isEdit
+          maintenance={editTarget}
           onClose={() => {
-            setIsCreateOpen(false);
-            load();
+            setEditTarget(null);
+            list.reload();
           }}
+        />
+      )}
+
+      {deleteTarget && (
+        <ConfirmModal
+          message={
+            list.trashed
+              ? "Permanently delete this maintenance record? This cannot be undone."
+              : "Move this maintenance record to trash?"
+          }
+          onConfirm={() =>
+            handleDelete(deleteTarget.maintenance_id, list.trashed)
+          }
+          onCancel={() => setDeleteTarget(null)}
+        />
+      )}
+
+      {bulkConfirm && (
+        <ConfirmModal
+          message={
+            list.trashed
+              ? `Permanently delete ${selectedKeys.length} selected record(s)? This cannot be undone.`
+              : `Move ${selectedKeys.length} selected record(s) to trash?`
+          }
+          onConfirm={handleBulkDelete}
+          onCancel={() => setBulkConfirm(false)}
         />
       )}
     </>

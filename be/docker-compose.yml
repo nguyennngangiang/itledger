@@ -22,6 +22,12 @@ services:
     environment:
       DATABASE_URL: postgresql://postgres:poop@db:5432/itledger
       CORS_ORIGINS: http://localhost:5173
+      # The embedding service runs on the HOST (so it can use the Intel NPU) —
+      # reach it from inside the container via host.docker.internal.
+      # Start it with:  powershell -ExecutionPolicy Bypass -File ai\run-host.ps1
+      AI_URL: http://host.docker.internal:8001
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     ports:
       - "8000:8000"
     depends_on:

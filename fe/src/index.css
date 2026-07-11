@@ -4,32 +4,32 @@
    neutrals, Inter typography, soft depth.
    ============================================================ */
 :root {
-  /* Brand / accent */
-  --accent: #4f46e5; /* indigo-600 */
-  --accent-hover: #4338ca; /* indigo-700 */
-  --accent-active: #3730a3; /* indigo-800 */
-  --accent-bg: #eef2ff; /* indigo-50 */
-  --accent-border: #c7d2fe; /* indigo-200 */
+  /* Brand / accent — soft periwinkle (pastel, still legible with white text) */
+  --accent: #7c74e8;
+  --accent-hover: #6b63dd;
+  --accent-active: #5b52c9;
+  --accent-bg: #eeecfd;
+  --accent-border: #d6d2f7;
   --accent-contrast: #ffffff;
 
-  /* Surfaces */
-  --bg: #f6f7fb; /* app background */
+  /* Surfaces — soft pastel */
+  --bg: #f5f4fb; /* lavender-tinted app background */
   --surface: #ffffff; /* cards, tables, modals */
-  --surface-muted: #f8fafc; /* subtle fills, table headers */
-  --sidebar: #0f172a; /* slate-900 navy sidebar */
-  --sidebar-muted: #1e293b; /* slate-800 */
+  --surface-muted: #f7f5fd; /* subtle fills, table headers */
+  --topbar-bg: #eceafb; /* light pastel top bar (replaces navy) */
+  --topbar-active: linear-gradient(135deg, #8b83f0, #7c74e8);
 
   /* Text */
-  --text: #0f172a; /* slate-900 primary text */
-  --text-muted: #64748b; /* slate-500 secondary text */
-  --text-faint: #94a3b8; /* slate-400 hints */
-  --text-on-dark: #e2e8f0; /* text on sidebar */
-  --text-on-dark-muted: #94a3b8;
+  --text: #2b2740; /* deep indigo-slate primary text */
+  --text-muted: #6b6785; /* muted secondary text */
+  --text-faint: #a5a1bb; /* hints */
+  --text-on-dark: #2b2740; /* top bar now light → dark text */
+  --text-on-dark-muted: #6b6785;
 
   /* Lines & depth */
-  --border: #e5e7eb; /* slate-200 */
-  --border-strong: #d1d5db;
-  --ring: rgba(79, 70, 229, 0.18);
+  --border: #ece9f5;
+  --border-strong: #dcd8ec;
+  --ring: rgba(124, 116, 232, 0.2);
   --shadow-sm: 0 1px 2px rgba(15, 23, 42, 0.04),
     0 1px 3px rgba(15, 23, 42, 0.06);
   --shadow-md: 0 4px 12px -2px rgba(15, 23, 42, 0.08),
@@ -78,6 +78,11 @@ body,
 
 body {
   overflow: hidden;
+  background:
+    radial-gradient(1200px 700px at 12% -8%, #ede9ff 0%, rgba(237, 233, 255, 0) 55%),
+    radial-gradient(1100px 650px at 100% 0%, #e3f0ff 0%, rgba(227, 240, 255, 0) 50%),
+    radial-gradient(900px 900px at 85% 110%, #f6e6ff 0%, rgba(246, 230, 255, 0) 55%),
+    linear-gradient(160deg, #eef0fb 0%, #e7e4f6 100%);
 }
 
 h1,

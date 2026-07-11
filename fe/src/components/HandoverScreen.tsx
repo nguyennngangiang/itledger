@@ -1,50 +1,104 @@
 import { useEffect, useState } from "react";
 import { Table, Button } from "antd";
 import type { TableColumnsType } from "antd";
-import { listHandovers } from "../api/handovers";
+import { toast } from "react-toastify";
+import {
+  pageHandovers,
+  deleteHandover,
+  deleteHandoversBatch,
+  restoreHandover,
+} from "../api/handovers";
 import { listUsers } from "../api/users";
-import type { Handover, User } from "../types";
-import { useLoading } from "../hook/LoadingContext";
+import { listDevices } from "../api/devices";
+import type { Handover, Device, User } from "../types";
+import { ConfirmModal } from "./Modal/ConfirmModal";
+import { BulkDeleteBar } from "./BulkDeleteBar";
+import { TrashToggle } from "./TrashToggle";
 import HandoverModal from "./Modal/HandoverModal";
-import { PlusIcon, RefreshIcon, HandoverIcon } from "./icons";
+import { PlusIcon, RefreshIcon, ArrowRightIcon, TrashIcon, EditIcon } from "./icons";
+import { formatDate, resolveOwner, toUserMap } from "../lib/format";
+import { usePagedList } from "../lib/usePagedList";
+import { TABLE_SCROLL } from "../lib/table";
 
-export const HandoverScreen = () => {
-  const [records, setRecords] = useState<Handover[]>([]);
+export const HandoverScreen = ({
+  refreshKey = 0,
+  onAdd,
+}: {
+  refreshKey?: number;
+  onAdd?: () => void;
+}) => {
   const [users, setUsers] = useState<Record<string, User>>({});
-  const [isCreateOpen, setIsCreateOpen] = useState(false);
-  const { startLoading, endLoading } = useLoading();
+  const [devices, setDevices] = useState<Record<string, Device>>({});
+  const [deleteTarget, setDeleteTarget] = useState<Handover | null>(null);
+  const [editTarget, setEditTarget] = useState<Handover | null>(null);
+  const [selectedKeys, setSelectedKeys] = useState<string[]>([]);
+  const [bulkConfirm, setBulkConfirm] = useState(false);
 
-  const load = async () => {
-    startLoading();
+  const list = usePagedList<Handover>(pageHandovers, {
+    defaultOrderBy: "handover_date",
+    defaultOrder: "desc",
+    refreshKey,
+  });
+
+  useEffect(() => setSelectedKeys([]), [list.trashed]);
+
+  const handleBulkDelete = async () => {
+    setBulkConfirm(false);
     try {
-      const [handovers, userList] = await Promise.all([
-        listHandovers(),
-        listUsers(),
-      ]);
-      setRecords(handovers);
-      setUsers(Object.fromEntries(userList.map((u) => [u.employee_code, u])));
-    } catch (err) {
-      console.error(err);
+      await deleteHandoversBatch(selectedKeys, list.trashed);
+      toast.success(
+        `${selectedKeys.length} record(s) ${
+          list.trashed ? "permanently deleted" : "moved to trash"
+        }`,
+      );
+      setSelectedKeys([]);
+    } catch (e) {
+      toast.error("Failed: " + e);
     } finally {
-      setTimeout(() => endLoading(), 600);
+      list.reload();
     }
   };
 
   useEffect(() => {
-    load();
+    Promise.all([listUsers(), listDevices()])
+      .then(([us, ds]) => {
+        setUsers(toUserMap(us));
+        setDevices(Object.fromEntries(ds.map((d) => [d.serial_number, d])));
+      })
+      .catch(() => {});
   }, []);
+
+  const handleDelete = async (id: string, permanent: boolean) => {
+    setDeleteTarget(null);
+    try {
+      await deleteHandover(id, permanent);
+      toast.success(permanent ? "Permanently deleted" : "Moved to trash");
+    } catch (e) {
+      toast.error("Failed: " + e);
+    } finally {
+      list.reload();
+    }
+  };
+
+  const handleRestore = async (id: string) => {
+    try {
+      await restoreHandover(id);
+      toast.success("Restored");
+    } catch (e) {
+      toast.error("Failed: " + e);
+    } finally {
+      list.reload();
+    }
+  };
 
   const dash = <span className="text-faint">—</span>;
 
-  const userLabel = (code: string | null) => {
-    if (!code) return dash;
-    const u = users[code];
+  const party = (code: string | null, to = false) => {
+    const o = resolveOwner(code, users);
     return (
-      <span>
-        <span style={{ fontWeight: 600 }}>{code}</span>
-        {u?.name ? (
-          <span className="text-faint"> · {u.name}</span>
-        ) : null}
+      <span className={`xfer-party${to ? " xfer-to" : ""}`}>
+        <span className="xfer-name">{o.name}</span>
+        <span className="xfer-team">{o.team}</span>
       </span>
     );
   };
@@ -54,42 +108,73 @@ export const HandoverScreen = () => {
       title: "Date",
       dataIndex: "handover_date",
       key: "handover_date",
-      render: (v) => v ?? dash,
+      width: 130,
+      sorter: true,
+      render: (v) => (v ? formatDate(v) : dash),
     },
     {
       title: "Device",
       dataIndex: "device_id",
       key: "device_id",
-      render: (v) => (v ? <span style={{ fontWeight: 600 }}>{v}</span> : dash),
-    },
-    {
-      title: "From",
-      dataIndex: "from_user_id",
-      key: "from_user_id",
-      render: (v) => userLabel(v),
-    },
-    {
-      title: "",
-      key: "arrow",
-      width: 40,
-      align: "center",
-      render: () => (
-        <span style={{ color: "var(--accent)" }}>
-          <HandoverIcon size={16} />
+      sorter: true,
+      render: (id: string | null) => (
+        <span style={{ fontWeight: 600 }}>
+          {(id && devices[id]?.name) || id || "—"}
         </span>
       ),
     },
     {
-      title: "To",
-      dataIndex: "to_user_id",
-      key: "to_user_id",
-      render: (v) => userLabel(v),
+      title: "Transfer",
+      key: "transfer",
+      align: "center",
+      render: (_, h) => (
+        <span className="xfer">
+          {party(h.from_user_id)}
+          <span className="xfer-arrow">
+            <ArrowRightIcon size={16} />
+          </span>
+          {party(h.to_user_id, true)}
+        </span>
+      ),
     },
     {
       title: "Reason",
       dataIndex: "reason",
       key: "reason",
-      render: (v) => v ?? dash,
+      render: (v) => (v ? v : dash),
+    },
+    {
+      title: "",
+      key: "options",
+      width: 140,
+      render: (_, h) =>
+        list.trashed ? (
+          <div className="flex items-center gap-1">
+            <Button size="small" onClick={() => handleRestore(h.handover_id)}>
+              Restore
+            </Button>
+            <Button
+              type="text"
+              danger
+              icon={<TrashIcon size={18} />}
+              onClick={() => setDeleteTarget(h)}
+            />
+          </div>
+        ) : (
+          <div className="flex items-center gap-1">
+            <Button
+              type="text"
+              icon={<EditIcon size={18} />}
+              onClick={() => setEditTarget(h)}
+            />
+            <Button
+              type="text"
+              danger
+              icon={<TrashIcon size={18} />}
+              onClick={() => setDeleteTarget(h)}
+            />
+          </div>
+        ),
     },
   ];
 
@@ -98,14 +183,11 @@ export const HandoverScreen = () => {
       <div className="screen-toolbar">
         <div />
         <div className="toolbar-actions">
-          <Button icon={<RefreshIcon size={16} />} onClick={load}>
+          <TrashToggle trashed={list.trashed} onToggle={list.toggleTrash} />
+          <Button icon={<RefreshIcon size={16} />} onClick={list.reload}>
             Refresh
           </Button>
-          <Button
-            type="primary"
-            icon={<PlusIcon size={16} />}
-            onClick={() => setIsCreateOpen(true)}
-          >
+          <Button type="primary" icon={<PlusIcon size={16} />} onClick={onAdd}>
             Record Handover
           </Button>
         </div>
@@ -113,26 +195,66 @@ export const HandoverScreen = () => {
 
       <div className="panel">
         <div className="panel-head">
-          <span className="panel-title">Handover history</span>
-          <span className="panel-count">{records.length} records</span>
+          <span className="panel-title">
+            {list.trashed ? "Trash" : "Handover history"}
+          </span>
+          {selectedKeys.length > 0 ? (
+            <BulkDeleteBar
+              count={selectedKeys.length}
+              trashed={list.trashed}
+              onDelete={() => setBulkConfirm(true)}
+              onClear={() => setSelectedKeys([])}
+            />
+          ) : (
+            <span className="panel-count">{list.total} total</span>
+          )}
         </div>
         <div className="table-wrap">
           <Table<Handover>
             rowKey="handover_id"
-            dataSource={records}
             columns={columns}
-            pagination={false}
-            scroll={{ x: "max-content" }}
+            scroll={TABLE_SCROLL}
+            rowSelection={{
+              selectedRowKeys: selectedKeys,
+              onChange: (keys) => setSelectedKeys(keys as string[]),
+            }}
+            {...list.tableProps}
           />
         </div>
       </div>
 
-      {isCreateOpen && (
+      {editTarget && (
         <HandoverModal
+          isEdit
+          handover={editTarget}
           onClose={() => {
-            setIsCreateOpen(false);
-            load();
+            setEditTarget(null);
+            list.reload();
           }}
+        />
+      )}
+
+      {deleteTarget && (
+        <ConfirmModal
+          message={
+            list.trashed
+              ? "Permanently delete this handover record? This cannot be undone."
+              : "Move this handover record to trash?"
+          }
+          onConfirm={() => handleDelete(deleteTarget.handover_id, list.trashed)}
+          onCancel={() => setDeleteTarget(null)}
+        />
+      )}
+
+      {bulkConfirm && (
+        <ConfirmModal
+          message={
+            list.trashed
+              ? `Permanently delete ${selectedKeys.length} selected record(s)? This cannot be undone.`
+              : `Move ${selectedKeys.length} selected record(s) to trash?`
+          }
+          onConfirm={handleBulkDelete}
+          onCancel={() => setBulkConfirm(false)}
         />
       )}
     </>

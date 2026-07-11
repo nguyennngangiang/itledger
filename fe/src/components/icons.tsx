@@ -119,6 +119,40 @@ export const CoinIcon = (p: IconProps) => (
   </Base>
 );
 
+export const ArrowRightIcon = (p: IconProps) => (
+  <Base {...p}>
+    <path d="M5 12h14" />
+    <path d="m13 5 7 7-7 7" />
+  </Base>
+);
+
+export const InfoIcon = (p: IconProps) => (
+  <Base {...p}>
+    <circle cx="12" cy="12" r="9" />
+    <path d="M12 11v5" />
+    <path d="M12 8h.01" />
+  </Base>
+);
+
+// "Why did this match?" — a magnifier with a check, distinct from the plain
+// SearchIcon and the circle-i InfoIcon. Used on smart-search results to reveal
+// the evidence (the sentence the AI ranked) behind a device's relevance score.
+export const ProveIcon = (p: IconProps) => (
+  <Base {...p}>
+    <circle cx="11" cy="11" r="7" />
+    <path d="m21 21-4.3-4.3" />
+    <path d="m8.4 11 1.9 1.9 3.3-3.6" />
+  </Base>
+);
+
+export const SparklesIcon = (p: IconProps) => (
+  <Base {...p}>
+    <path d="M12 3l1.6 4.4L18 9l-4.4 1.6L12 15l-1.6-4.4L6 9l4.4-1.6L12 3Z" />
+    <path d="M19 14l.7 1.9L21.5 16.5l-1.8.6L19 19l-.7-1.9L16.5 16.5l1.8-.6L19 14Z" />
+    <path d="M5 13l.6 1.6L7 15.2l-1.4.6L5 17l-.6-1.6L3 15.2l1.4-.6L5 13Z" />
+  </Base>
+);
+
 export const LogoMark = (p: IconProps) => (
   <Base {...p} strokeWidth={1.9}>
     <path d="M4 7l8-4 8 4-8 4-8-4Z" />

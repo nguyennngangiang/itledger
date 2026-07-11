@@ -34,6 +34,10 @@ TEAMS = [
     "FIN", "ADMIN", "IT", "S&P", "QA/QC", "KRDESK", "OPD",
 ]
 
+# Single "ghost" account in the IT team that holds every ownerless device,
+# so a device always resolves to an owner name/team and "in stock" is meaningful.
+GHOST_CODE = "IT-STORE"
+
 SURNAMES = ["Nguyen", "Tran", "Le", "Pham", "Hoang", "Vu", "Dang",
             "Bui", "Do", "Ho", "Ngo", "Duong", "Ly", "Phan", "Vo"]
 MIDDLES = ["Van", "Thi", "Huu", "Duc", "Minh", "Ngoc", "Thanh",
@@ -94,10 +98,18 @@ def build_devices(users: list[dict]) -> list[dict]:
     for i in range(1, N_DEVICES + 1):
         brand = RNG.choice(list(BRANDS))
         model = RNG.choice(BRANDS[brand]).strip()
-        # ~80% of devices are assigned to an employee, the rest are in stock.
-        owner = RNG.choice(users)["employee_code"] if RNG.random() < 0.8 else None
+        # ~75% assigned to an employee; the rest sit with the ghost IT store.
+        owner = RNG.choice(users)["employee_code"] if RNG.random() < 0.75 else GHOST_CODE
+        # Base status follows ownership, then sprinkle repairs / pending-deletes.
+        roll = RNG.random()
+        if roll < 0.10:
+            status = "maintaining"
+        elif roll < 0.15:
+            status = "on_del"
+        else:
+            status = "active" if owner != GHOST_CODE else "in_stock"
         devices.append({
-            "serial_number": f"SN-{i:06d}",
+            "serial_number": f"SN{i:06d}",
             "barcode": f"BC{RNG.randint(10**11, 10**12 - 1)}",
             "type": RNG.choice(TYPES),
             "brand": brand,
@@ -109,6 +121,7 @@ def build_devices(users: list[dict]) -> list[dict]:
             "buy_date": random_date(1800, 30),
             "name": f"{brand} {model}",
             "user_id": owner,
+            "status": status,
         })
     return devices
 
@@ -161,6 +174,21 @@ async def seed() -> None:
     conn = await asyncpg.connect(dsn=settings.database_url)
     try:
         async with conn.transaction():
+            # --- idempotent migration: status + soft-delete columns + ghost user ---
+            await conn.execute(
+                "ALTER TABLE devices ADD COLUMN IF NOT EXISTS status VARCHAR(100)"
+            )
+            for tbl in ("devices", "maintenance", "handovers"):
+                await conn.execute(
+                    f"ALTER TABLE {tbl} ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMP"
+                )
+            await conn.execute(
+                """INSERT INTO users (employee_code, name, team)
+                   VALUES ($1, 'IT Store', 'IT')
+                   ON CONFLICT (employee_code) DO NOTHING""",
+                GHOST_CODE,
+            )
+
             await conn.executemany(
                 """INSERT INTO users (employee_code, name, team)
                    VALUES ($1, $2, $3) ON CONFLICT (employee_code) DO NOTHING""",
@@ -168,12 +196,38 @@ async def seed() -> None:
             )
             await conn.executemany(
                 """INSERT INTO devices (serial_number, barcode, type, brand, cpu,
-                       ram, storage, os, msoffice, buy_date, name, user_id)
-                   VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+                       ram, storage, os, msoffice, buy_date, name, user_id, status)
+                   VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
                    ON CONFLICT (serial_number) DO NOTHING""",
                 [(d["serial_number"], d["barcode"], d["type"], d["brand"], d["cpu"],
                   d["ram"], d["storage"], d["os"], d["msoffice"], d["buy_date"],
-                  d["name"], d["user_id"]) for d in devices],
+                  d["name"], d["user_id"], d["status"]) for d in devices],
+            )
+
+            # --- backfill legacy rows (e.g. devices seeded before `status`) ---
+            # Order matters; each step only touches still-NULL rows, so manual
+            # overrides set later via the UI are never clobbered on re-run.
+            await conn.execute(
+                "UPDATE devices SET user_id = $1 WHERE user_id IS NULL", GHOST_CODE
+            )
+            # A device with a maintenance record is currently being serviced.
+            await conn.execute(
+                """UPDATE devices SET status = 'maintaining'
+                   WHERE status IS NULL
+                     AND serial_number IN (
+                         SELECT DISTINCT device_id FROM maintenance
+                         WHERE device_id IS NOT NULL)"""
+            )
+            # A deterministic slice flagged as pending-delete (malfunctioning).
+            await conn.execute(
+                "UPDATE devices SET status = 'on_del' WHERE status IS NULL AND right(serial_number, 1) = '7'"
+            )
+            # Everything else follows ownership.
+            await conn.execute(
+                """UPDATE devices
+                   SET status = CASE WHEN user_id = $1 THEN 'in_stock' ELSE 'active' END
+                   WHERE status IS NULL""",
+                GHOST_CODE,
             )
             # Mirror current ownership into the user_devices join table.
             await conn.executemany(

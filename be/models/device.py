@@ -16,6 +16,7 @@ class DeviceBase(BaseModel):
     buy_date: date | None = None
     name: str | None = None
     user_id: str | None = None
+    status: str | None = None  # active | in_stock | maintaining | on_del
 
 
 class DeviceCreate(DeviceBase):

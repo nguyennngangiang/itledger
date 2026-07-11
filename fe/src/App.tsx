@@ -1,72 +1,110 @@
 import "./App.css";
 
-import { useState } from "react";
-import { Layout, Menu } from "antd";
-import type { MenuProps } from "antd";
+import { useEffect, useRef, useState } from "react";
 import loadingGif from "./assets/loading.gif";
 import { useLoading } from "./hook/LoadingContext";
+import { SparkleBackground } from "./components/SparkleBackground";
+import {
+  installSparkleClicks,
+  installButtonPress,
+  animateEntrance,
+  animateSwitch,
+  slideNavIndicator,
+} from "./lib/sparkle";
 import { Dashboard } from "./components/Dashboard";
 import { DeviceMainScreen } from "./components/DeviceMainScreen";
-import { UserMainScreen } from "./components/UserMainScreen";
 import { MaintenanceScreen } from "./components/MaintenanceScreen";
 import { HandoverScreen } from "./components/HandoverScreen";
+import { CreateDeviceModal } from "./components/Modal/CreateDeviceModal";
+import MaintenanceModal from "./components/Modal/MaintenanceModal";
+import HandoverModal from "./components/Modal/HandoverModal";
 import {
   DashboardIcon,
   DeviceIcon,
-  UserIcon,
   WrenchIcon,
   HandoverIcon,
   LogoMark,
+  PlusIcon,
 } from "./components/icons";
 
-type ActiveMenu =
-  | "dashboard"
-  | "device"
-  | "user"
-  | "maintenance"
-  | "handover";
+type Page = "dashboard" | "device" | "maintenance" | "handover";
+export type QuickAdd = "device" | "maintenance" | "handover";
 
-type NavMeta = { title: string; subtitle: string };
+const NAV: { key: Page; label: string; icon: React.ReactNode }[] = [
+  { key: "dashboard", label: "Dashboard", icon: <DashboardIcon size={17} /> },
+  { key: "device", label: "Devices", icon: <DeviceIcon size={17} /> },
+  { key: "maintenance", label: "Maintenance", icon: <WrenchIcon size={17} /> },
+  { key: "handover", label: "Handover", icon: <HandoverIcon size={17} /> },
+];
 
-const NAV: Record<ActiveMenu, NavMeta> = {
+const META: Record<Page, { title: string; subtitle: string }> = {
   dashboard: {
     title: "Dashboard",
-    subtitle: "Overview of your IT assets and activity",
+    subtitle: "Fleet overview — device mix and lifecycle status",
   },
-  device: {
-    title: "Devices",
-    subtitle: "Track and manage company hardware",
-  },
-  user: {
-    title: "Users",
-    subtitle: "Employees and their team assignments",
-  },
+  device: { title: "Devices", subtitle: "Company hardware, owners and status" },
   maintenance: {
     title: "Maintenance",
-    subtitle: "Repair and service records for devices",
+    subtitle: "Repair and service history per device",
   },
-  handover: {
-    title: "Handover",
-    subtitle: "Device transfers between employees",
-  },
+  handover: { title: "Handover", subtitle: "Who received which device, and when" },
 };
 
-const menuItems: MenuProps["items"] = [
-  { key: "dashboard", icon: <DashboardIcon size={18} />, label: "Dashboard" },
-  { type: "divider" },
-  { key: "device", icon: <DeviceIcon size={18} />, label: "Devices" },
-  { key: "user", icon: <UserIcon size={18} />, label: "Users" },
-  { key: "maintenance", icon: <WrenchIcon size={18} />, label: "Maintenance" },
-  { key: "handover", icon: <HandoverIcon size={18} />, label: "Handover" },
+const QUICK_ADD: { key: QuickAdd; label: string }[] = [
+  { key: "device", label: "Device" },
+  { key: "maintenance", label: "Maintenance" },
+  { key: "handover", label: "Handover" },
 ];
 
 function App() {
-  const [activeMenu, setActiveMenu] = useState<ActiveMenu>("dashboard");
+  const [page, setPage] = useState<Page>("dashboard");
+  const [createModal, setCreateModal] = useState<QuickAdd | null>(null);
+  const [refresh, setRefresh] = useState({
+    device: 0,
+    maintenance: 0,
+    handover: 0,
+  });
   const { loading } = useLoading();
-  const meta = NAV[activeMenu];
+
+  const navRef = useRef<HTMLElement>(null);
+  const indicatorRef = useRef<HTMLSpanElement>(null);
+
+  // Global click sparkles + springy press feedback on hero controls.
+  useEffect(() => installSparkleClicks(), []);
+  useEffect(() => installButtonPress(), []);
+
+  // Sparkly staggered entrance for the top bar + nav on first paint.
+  useEffect(() => {
+    animateEntrance(".topbar-brand, .topnav-item, .quick-add-btn, .topbar-avatar", 55);
+  }, []);
+
+  // Re-run the (bigger, smoother) page entrance whenever the page changes.
+  useEffect(() => {
+    animateSwitch(".app-content > *", 55);
+  }, [page]);
+
+  // Slide the nav highlight pill under the active tab on every switch.
+  useEffect(() => {
+    const active = navRef.current?.querySelector<HTMLElement>(".topnav-item.active");
+    if (active && indicatorRef.current) slideNavIndicator(indicatorRef.current, active);
+  }, [page]);
+
+  // Open a create modal as an overlay WITHOUT navigating away from the
+  // current page. (Previously this switched pages and, via a mount effect,
+  // caused nav clicks to auto-open modals — that bug is gone now.)
+  const openCreate = (target: QuickAdd) => setCreateModal(target);
+
+  const closeCreate = () => {
+    if (createModal) setRefresh((r) => ({ ...r, [createModal]: r[createModal] + 1 }));
+    setCreateModal(null);
+  };
+
+  const meta = META[page];
 
   return (
     <>
+      <SparkleBackground />
+
       {loading && (
         <div className="app-loading-overlay">
           <div className="app-loading-card">
@@ -76,59 +114,79 @@ function App() {
         </div>
       )}
 
-      <Layout className="app-layout">
-        <Layout.Sider width={248} className="sidebar" theme="dark">
-          <div className="sidebar-brand">
-            <span className="sidebar-logo">
-              <LogoMark size={22} />
+      <div className="app-shell">
+        <header className="topbar">
+          <div className="topbar-brand">
+            <span className="topbar-logo">
+              <LogoMark size={20} />
             </span>
-            <div className="sidebar-brand-text">
-              <span className="sidebar-title">IT Ledger</span>
-              <span className="sidebar-subtitle">Asset Management</span>
-            </div>
+            <span className="topbar-brand-name">IT Ledger</span>
           </div>
 
-          <Menu
-            className="sidebar-menu"
-            theme="dark"
-            mode="inline"
-            selectedKeys={[activeMenu]}
-            items={menuItems}
-            onClick={(e) => setActiveMenu(e.key as ActiveMenu)}
-          />
+          <nav className="topnav" ref={navRef}>
+            <span className="topnav-indicator" ref={indicatorRef} />
+            {NAV.map((item) => (
+              <button
+                key={item.key}
+                className={`topnav-item${page === item.key ? " active" : ""}`}
+                onClick={() => setPage(item.key)}
+              >
+                {item.icon}
+                <span>{item.label}</span>
+              </button>
+            ))}
+          </nav>
 
-          <div className="sidebar-footer">
-            <span className="sidebar-footer-dot" />
-            All systems operational
+          <div className="topbar-actions">
+            <div className="quick-add">
+              {QUICK_ADD.map((q) => (
+                <button
+                  key={q.key}
+                  className="quick-add-btn"
+                  onClick={() => openCreate(q.key)}
+                  title={`Add ${q.label}`}
+                >
+                  <PlusIcon size={15} />
+                  <span>{q.label}</span>
+                </button>
+              ))}
+            </div>
+            <div className="topbar-avatar">IT</div>
           </div>
-        </Layout.Sider>
+        </header>
 
-        <Layout className="app-main">
-          <header className="app-header">
-            <div>
-              <h1 className="app-header-title">{meta.title}</h1>
-              <p className="app-header-subtitle">{meta.subtitle}</p>
-            </div>
-            <div className="app-header-user">
-              <div className="app-header-avatar">IT</div>
-              <div className="app-header-user-text">
-                <span className="app-header-user-name">IT Admin</span>
-                <span className="app-header-user-role">Administrator</span>
-              </div>
-            </div>
-          </header>
+        <div className="page-subheader">
+          <h1 className="page-title">{meta.title}</h1>
+          <p className="page-subtitle">{meta.subtitle}</p>
+        </div>
 
-          <Layout.Content className="app-content">
-            {activeMenu === "dashboard" && (
-              <Dashboard onNavigate={(k) => setActiveMenu(k as ActiveMenu)} />
-            )}
-            {activeMenu === "device" && <DeviceMainScreen />}
-            {activeMenu === "user" && <UserMainScreen />}
-            {activeMenu === "maintenance" && <MaintenanceScreen />}
-            {activeMenu === "handover" && <HandoverScreen />}
-          </Layout.Content>
-        </Layout>
-      </Layout>
+        <main className="app-content">
+          {page === "dashboard" && <Dashboard refreshKey={refresh.device} />}
+          {page === "device" && (
+            <DeviceMainScreen
+              refreshKey={refresh.device}
+              onAdd={() => openCreate("device")}
+            />
+          )}
+          {page === "maintenance" && (
+            <MaintenanceScreen
+              refreshKey={refresh.maintenance}
+              onAdd={() => openCreate("maintenance")}
+            />
+          )}
+          {page === "handover" && (
+            <HandoverScreen
+              refreshKey={refresh.handover}
+              onAdd={() => openCreate("handover")}
+            />
+          )}
+        </main>
+      </div>
+
+      {/* Global create modals — open over any page, never navigate. */}
+      {createModal === "device" && <CreateDeviceModal onClose={closeCreate} />}
+      {createModal === "maintenance" && <MaintenanceModal onClose={closeCreate} />}
+      {createModal === "handover" && <HandoverModal onClose={closeCreate} />}
     </>
   );
 }

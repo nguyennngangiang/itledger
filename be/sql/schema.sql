@@ -18,7 +18,9 @@ CREATE TABLE devices (
     msoffice VARCHAR(100),
     buy_date DATE,
     name VARCHAR(100),
-    user_id VARCHAR(100) REFERENCES users(employee_code)
+    user_id VARCHAR(100) REFERENCES users(employee_code),
+    status VARCHAR(100),
+    deleted_at TIMESTAMP
 );
 
 CREATE TABLE handovers (
@@ -27,7 +29,8 @@ CREATE TABLE handovers (
     device_id VARCHAR(100) REFERENCES devices(serial_number),
     from_user_id VARCHAR(100) REFERENCES users(employee_code),
     to_user_id VARCHAR(100) REFERENCES users(employee_code),
-    reason VARCHAR(100)
+    reason VARCHAR(100),
+    deleted_at TIMESTAMP
 );
 
 CREATE TABLE maintenance (
@@ -40,7 +43,8 @@ CREATE TABLE maintenance (
     solution VARCHAR(500),
     result VARCHAR(500),
     cost_vnd DECIMAL(12, 2),
-    remarks VARCHAR(500)
+    remarks VARCHAR(500),
+    deleted_at TIMESTAMP
 );
 
 CREATE TABLE user_devices (
