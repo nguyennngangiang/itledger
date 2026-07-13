@@ -12,8 +12,10 @@ from pydantic import BaseModel
 from ..config import settings
 from ..db import get_pool
 from ..glossary import bilingualize
+from .. import llm
 from ..models.device import DeviceCreate, DeviceOut, DeviceUpdate, DeviceDelete
 from ..repositories import device as repo
+from ..repositories import feedback as feedback_repo
 from ..repositories import maintenance as maint_repo
 from ..repositories import user as user_repo
 from ..repositories.errors import DuplicateError, ForeignKeyError
@@ -33,10 +35,12 @@ class ImportResult(BaseModel):
 
 
 class DeviceRanked(DeviceOut):
-    """A device plus its semantic-similarity score (0–1) and the exact sentence
-    the embedder ranked it on (`document`)."""
+    """A device plus its semantic-similarity score (0–1), the exact sentence the
+    embedder ranked it on (`document`), and — when the LLM reranker ran — its
+    one-line `reason` for the placement."""
     score: float
     document: str
+    reason: str | None = None
 
 
 def _age_phrase(buy_date) -> str | None:
@@ -159,11 +163,12 @@ async def filter_devices(field: str, value: str, pool=Depends(get_pool)):
 
 @router.get("/semantic-search", response_model=list[DeviceRanked])
 async def semantic_search(
-    q: str, limit: int = 20, pool=Depends(get_pool)
+    q: str, limit: int = 20, rerank: bool = False, pool=Depends(get_pool)
 ):
     """Rank active devices by how well they match a natural-language query,
-    using the local embedding service. Declared before /{serial_number} so
-    "semantic-search" isn't read as a serial number."""
+    using the local embedding service. With `rerank=true` the LLM re-sorts the
+    results, learning from this project's marked-correct feedback. Declared before
+    /{serial_number} so "semantic-search" isn't read as a serial number."""
     devices = await repo.list_devices(pool)
     if not devices:
         return []
@@ -204,6 +209,10 @@ async def semantic_search(
         for r in ranked
         if r["id"] in by_id
     ]
+
+    if rerank and results:
+        examples = await feedback_repo.examples_for_query(pool, "devices", q)
+        results = await llm.rerank_results(q, results, examples, "serial_number")
 
     return results
 

@@ -3,11 +3,15 @@ from fastapi import FastAPI, Response, status
 from fastapi.middleware.cors import CORSMiddleware
 from . import db
 from .config import settings
-from .routers import devices, handovers, maintenance, users
+from .repositories import feedback as feedback_repo
+from .routers import assistant, devices, feedback, handovers, maintenance, users
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await db.connect()
+    # Ensure the search_feedback table exists on already-running databases
+    # (schema.sql only runs on a fresh volume).
+    await feedback_repo.ensure_table(db.get_pool())
     yield
     await db.disconnect()
 
@@ -25,6 +29,8 @@ app.include_router(devices.router)
 app.include_router(handovers.router)
 app.include_router(maintenance.router)
 app.include_router(users.router)
+app.include_router(feedback.router)
+app.include_router(assistant.router)
 
 
 @app.get("/health", tags=["meta"])

@@ -10,9 +10,11 @@ from pydantic import BaseModel
 from ..config import settings
 from ..db import get_pool
 from ..glossary import bilingualize
+from .. import llm
 from ..models.handover import HandoverCreate, HandoverOut, HandoverUpdate
 from ..repositories import handover as repo
 from ..repositories import device as device_repo
+from ..repositories import feedback as feedback_repo
 from ..repositories import user as user_repo
 from ..repositories.errors import DuplicateError, ForeignKeyError
 
@@ -25,10 +27,12 @@ class HandoverPage(BaseModel):
 
 
 class HandoverRanked(HandoverOut):
-    """A handover record plus its semantic-similarity score (0–1) and the exact
-    sentence the embedder ranked it on (`document`)."""
+    """A handover record plus its semantic-similarity score (0–1), the exact
+    sentence the embedder ranked it on (`document`), and the LLM reranker's
+    one-line `reason` when it ran."""
     score: float
     document: str
+    reason: str | None = None
 
 
 def _who(user: dict, uid: str | None) -> str | None:
@@ -112,10 +116,13 @@ async def page_handovers(
 
 
 @router.get("/semantic-search", response_model=list[HandoverRanked])
-async def semantic_search(q: str, limit: int = 20, pool=Depends(get_pool)):
+async def semantic_search(
+    q: str, limit: int = 20, rerank: bool = False, pool=Depends(get_pool)
+):
     """Rank active handover records by how well they match a natural-language
-    query, using the local embedding service. Declared before /{handover_id} so
-    "semantic-search" isn't read as an id."""
+    query, using the local embedding service. With `rerank=true` the LLM re-sorts
+    the results, learning from this project's marked-correct feedback. Declared
+    before /{handover_id} so "semantic-search" isn't read as an id."""
     records = await repo.list_handovers(pool)
     if not records:
         return []
@@ -140,7 +147,7 @@ async def semantic_search(q: str, limit: int = 20, pool=Depends(get_pool)):
         raise HTTPException(503, f"AI search service unavailable: {e}")
 
     by_id = {h["handover_id"]: h for h in records}
-    return [
+    results = [
         {
             **by_id[r["id"]],
             "score": round(r["score"], 4),
@@ -149,6 +156,12 @@ async def semantic_search(q: str, limit: int = 20, pool=Depends(get_pool)):
         for r in ranked
         if r["id"] in by_id
     ]
+
+    if rerank and results:
+        examples = await feedback_repo.examples_for_query(pool, "handovers", q)
+        results = await llm.rerank_results(q, results, examples, "handover_id")
+
+    return results
 
 
 @router.post("/{handover_id}/restore", response_model=HandoverOut)

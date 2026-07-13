@@ -21,6 +21,11 @@ class Settings:
     ).split(",")
     # Local semantic-search embedding service (see ai/main.py) — embedding-only.
     ai_url: str = os.getenv("AI_URL", "http://localhost:8001")
+    # Internal-network OpenAI-compatible LLM (see be/llm.py). Key is a secret —
+    # keep it in be/.env (gitignored), never in docker-compose.yml or git.
+    llm_base_url: str = os.getenv("LLM_BASE_URL", "http://192.168.3.252:8443/v1")
+    llm_api_key: str = os.getenv("LLM_API_KEY", "")
+    llm_model: str = os.getenv("LLM_MODEL", "llama3.1:8b")
 
 
 settings = Settings()

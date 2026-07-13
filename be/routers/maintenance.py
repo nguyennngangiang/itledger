@@ -10,9 +10,11 @@ from pydantic import BaseModel
 from ..config import settings
 from ..db import get_pool
 from ..glossary import bilingualize
+from .. import llm
 from ..models.maintenance import MaintenanceCreate, MaintenanceOut, MaintenanceUpdate
 from ..repositories import maintenance as repo
 from ..repositories import device as device_repo
+from ..repositories import feedback as feedback_repo
 from ..repositories import user as user_repo
 from ..repositories.errors import DuplicateError, ForeignKeyError
 
@@ -25,10 +27,12 @@ class MaintenancePage(BaseModel):
 
 
 class MaintenanceRanked(MaintenanceOut):
-    """A maintenance record plus its semantic-similarity score (0–1) and the
-    exact sentence the embedder ranked it on (`document`)."""
+    """A maintenance record plus its semantic-similarity score (0–1), the exact
+    sentence the embedder ranked it on (`document`), and the LLM reranker's
+    one-line `reason` when it ran."""
     score: float
     document: str
+    reason: str | None = None
 
 
 def _maintenance_document(m: dict, devices: dict, users: dict) -> str:
@@ -108,10 +112,13 @@ async def search_maintenance(q: str, pool=Depends(get_pool)):
 
 
 @router.get("/semantic-search", response_model=list[MaintenanceRanked])
-async def semantic_search(q: str, limit: int = 20, pool=Depends(get_pool)):
+async def semantic_search(
+    q: str, limit: int = 20, rerank: bool = False, pool=Depends(get_pool)
+):
     """Rank active maintenance records by how well they match a natural-language
-    query, using the local embedding service. Declared before /{maintenance_id}
-    so "semantic-search" isn't read as an id."""
+    query, using the local embedding service. With `rerank=true` the LLM re-sorts
+    the results, learning from this project's marked-correct feedback. Declared
+    before /{maintenance_id} so "semantic-search" isn't read as an id."""
     records = await repo.list_maintenance(pool)
     if not records:
         return []
@@ -136,7 +143,7 @@ async def semantic_search(q: str, limit: int = 20, pool=Depends(get_pool)):
         raise HTTPException(503, f"AI search service unavailable: {e}")
 
     by_id = {m["maintenance_id"]: m for m in records}
-    return [
+    results = [
         {
             **by_id[r["id"]],
             "score": round(r["score"], 4),
@@ -145,6 +152,12 @@ async def semantic_search(q: str, limit: int = 20, pool=Depends(get_pool)):
         for r in ranked
         if r["id"] in by_id
     ]
+
+    if rerank and results:
+        examples = await feedback_repo.examples_for_query(pool, "maintenance", q)
+        results = await llm.rerank_results(q, results, examples, "maintenance_id")
+
+    return results
 
 
 @router.post("/{maintenance_id}/restore", response_model=MaintenanceOut)
