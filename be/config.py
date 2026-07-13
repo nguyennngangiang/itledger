@@ -19,9 +19,7 @@ class Settings:
     cors_origins: list[str] = os.getenv(
         "CORS_ORIGINS", "http://localhost:5173"
     ).split(",")
-    # Local semantic-search embedding service (see ai/main.py). The same host
-    # service also proxies the local LLM (Ollama) for rerank / explain / ask,
-    # so the backend only ever talks to ai_url — never Ollama directly.
+    # Local semantic-search embedding service (see ai/main.py) — embedding-only.
     ai_url: str = os.getenv("AI_URL", "http://localhost:8001")
 
 

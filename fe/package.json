@@ -4,10 +4,9 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "dev": "concurrently -n vite,ai,ollama -c cyan,magenta,green \"npm:dev:vite\" \"npm:dev:ai\" \"npm:dev:ollama\"",
+    "dev": "concurrently -n vite,ai -c cyan,magenta \"npm:dev:vite\" \"npm:dev:ai\"",
     "dev:vite": "vite",
     "dev:ai": "powershell -ExecutionPolicy Bypass -File ../ai/run-host.ps1",
-    "dev:ollama": "powershell -ExecutionPolicy Bypass -File ../ai/run-ollama.ps1",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
     "preview": "vite preview"

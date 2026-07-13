@@ -8,9 +8,7 @@ import {
   deleteDevicesBatch,
   restoreDevice,
   semanticSearchDevices,
-  explainMatch,
 } from "../api/devices";
-import { markFeedback } from "../api/feedback";
 import { listUsers } from "../api/users";
 import type { Device, DeviceRanked, DeviceStatus, User } from "../types";
 import { DEVICE_STATUS_META, DEVICE_STATUS_ORDER } from "../types";
@@ -28,10 +26,8 @@ import {
   InfoIcon,
   UploadIcon,
   SparklesIcon,
-  ProveIcon,
-  CheckIcon,
 } from "./icons";
-import { AssistantModal } from "./Modal/AssistantModal";
+import { relevanceColumn } from "../lib/relevance";
 import { formatDate, resolveOwner, toUserMap } from "../lib/format";
 import { usePagedList } from "../lib/usePagedList";
 import { TABLE_SCROLL } from "../lib/table";
@@ -56,15 +52,9 @@ export const DeviceMainScreen = ({
   // Smart (semantic) search state. When aiResults !== null the table shows the
   // ranked results instead of the normal paged list.
   const [smart, setSmart] = useState(false);
-  const [rerank, setRerank] = useState(false); // LLM re-sort of smart results
   const [aiResults, setAiResults] = useState<DeviceRanked[] | null>(null);
   const [aiQuery, setAiQuery] = useState("");
   const [aiLoading, setAiLoading] = useState(false);
-  const [showAssistant, setShowAssistant] = useState(false);
-  // Per-result LLM state (keyed by serial): "mark correct" set + explanations.
-  const [marked, setMarked] = useState<Set<string>>(new Set());
-  const [explanations, setExplanations] = useState<Record<string, string>>({});
-  const [explaining, setExplaining] = useState<Record<string, boolean>>({});
 
   const showingAi = aiResults !== null;
 
@@ -84,52 +74,14 @@ export const DeviceMainScreen = ({
       return;
     }
     setAiLoading(true);
-    // Fresh query → drop the previous marks / explanations.
-    setMarked(new Set());
-    setExplanations({});
-    setExplaining({});
     try {
-      const res = await semanticSearchDevices(q, 30, rerank);
+      const res = await semanticSearchDevices(q, 30);
       setAiResults(res);
       setAiQuery(q);
     } catch (e) {
       toast.error("Smart search failed: " + e);
     } finally {
       setAiLoading(false);
-    }
-  };
-
-  // Lazily fetch the LLM's "why it matched" line when a proof card opens.
-  const fetchExplanation = async (d: DeviceRanked) => {
-    const key = d.serial_number;
-    if (explanations[key] !== undefined || explaining[key]) return;
-    setExplaining((m) => ({ ...m, [key]: true }));
-    try {
-      const { explanation } = await explainMatch(aiQuery, d.document ?? "");
-      setExplanations((m) => ({ ...m, [key]: explanation }));
-    } catch {
-      setExplanations((m) => ({ ...m, [key]: "" })); // blank = unavailable, no retry loop
-    } finally {
-      setExplaining((m) => ({ ...m, [key]: false }));
-    }
-  };
-
-  // Record a "this result is right" mark — the training signal for the LLM.
-  const markCorrect = async (d: DeviceRanked) => {
-    const key = d.serial_number;
-    if (marked.has(key)) return;
-    try {
-      await markFeedback({
-        query: aiQuery,
-        device_id: d.serial_number,
-        document: d.document,
-        score: d.score,
-        label: 1,
-      });
-      setMarked((s) => new Set(s).add(key));
-      toast.success("Marked correct — the AI will learn from this");
-    } catch (e) {
-      toast.error("Couldn't save mark: " + e);
     }
   };
 
@@ -311,108 +263,8 @@ export const DeviceMainScreen = ({
     },
   ];
 
-  // Highlight the query's words inside the proof text. Semantic search matches
-  // by *meaning*, so an exact-word hit isn't guaranteed — this just calls out
-  // any literal overlaps; the full sentence is the real evidence.
-  const highlightProof = (text: string, query: string) => {
-    const tokens = query
-      .toLowerCase()
-      .split(/[^a-z0-9]+/i)
-      .filter((t) => t.length >= 3);
-    if (!tokens.length) return text;
-    const escaped = tokens.map((t) => t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
-    const re = new RegExp(`(${escaped.join("|")})`, "ig");
-    return text.split(re).map((part, i) =>
-      tokens.includes(part.toLowerCase()) ? (
-        <mark key={i} className="prove-hl">
-          {part}
-        </mark>
-      ) : (
-        <span key={i}>{part}</span>
-      ),
-    );
-  };
-
-  // The "prove it" popover: the LLM's plain-language reason, the exact sentence
-  // the embedder ranked this device on, and a "mark correct" button that feeds
-  // the model. So a match for "broken" / "old" is explainable — and correctable.
-  const proofContent = (d: DeviceRanked) => {
-    const key = d.serial_number;
-    const isMarked = marked.has(key);
-    const why = explanations[key];
-    return (
-      <div className="prove-pop">
-        <div className="prove-pop-head">
-          <span className="prove-pop-score">
-            {Math.round((d.score ?? 0) * 100)}% match
-          </span>
-          <span className="prove-pop-note">meaning + keyword overlap</span>
-        </div>
-
-        <div className="prove-pop-why">
-          <SparklesIcon size={13} />
-          {explaining[key] ? (
-            <span className="prove-pop-dim">the local LLM is thinking…</span>
-          ) : why ? (
-            <span>{why}</span>
-          ) : (
-            <span className="prove-pop-dim">LLM explanation unavailable</span>
-          )}
-        </div>
-
-        {d.reason && (
-          <div className="prove-pop-reason">
-            <b>Rerank:</b> {d.reason}
-          </div>
-        )}
-
-        <p className="prove-pop-text">{highlightProof(d.document ?? "", aiQuery)}</p>
-
-        <button
-          className={`prove-mark${isMarked ? " done" : ""}`}
-          onClick={() => markCorrect(d)}
-          disabled={isMarked}
-        >
-          <CheckIcon size={14} />
-          {isMarked ? "Marked correct" : "Mark as correct — teach the AI"}
-        </button>
-      </div>
-    );
-  };
-
   // Relevance meter shown as the first column in smart-search results.
-  const relevanceColumn: TableColumnsType<Device>[number] = {
-    title: "Relevance",
-    key: "score",
-    width: 168,
-    render: (_, d) => {
-      const ranked = d as DeviceRanked;
-      const pct = Math.round((ranked.score ?? 0) * 100);
-      return (
-        <span className="relevance">
-          <span className="relevance-track">
-            <span className="relevance-fill" style={{ width: `${pct}%` }} />
-          </span>
-          <span className="relevance-num">{pct}%</span>
-          <Popover
-            title="Why this matched"
-            content={proofContent(ranked)}
-            trigger="hover"
-            placement="left"
-            overlayClassName="prove-overlay"
-            mouseEnterDelay={0.45}
-            onOpenChange={(open) => {
-              if (open) fetchExplanation(ranked);
-            }}
-          >
-            <span className="prove-trigger" aria-label="Why this matched">
-              <ProveIcon size={16} />
-            </span>
-          </Popover>
-        </span>
-      );
-    },
-  };
+  const relevanceCol = relevanceColumn<Device>();
 
   const statusChips: StatusFilter[] = ["all", ...DEVICE_STATUS_ORDER];
 
@@ -453,25 +305,8 @@ export const DeviceMainScreen = ({
           >
             {smart ? "Smart: on" : "Smart"}
           </Button>
-          {smart && (
-            <Button
-              type={rerank ? "primary" : "default"}
-              icon={<ProveIcon size={16} />}
-              title="Re-rank smart results with the local LLM (qwen2.5) — it learns from your marks"
-              onClick={() => setRerank((v) => !v)}
-            >
-              {rerank ? "LLM rerank: on" : "LLM rerank"}
-            </Button>
-          )}
         </div>
         <div className="toolbar-actions">
-          <Button
-            icon={<SparklesIcon size={16} />}
-            onClick={() => setShowAssistant(true)}
-            title="Ask the local LLM about your fleet"
-          >
-            Ask AI
-          </Button>
           <TrashToggle trashed={list.trashed} onToggle={list.toggleTrash} />
           <Button icon={<RefreshIcon size={16} />} onClick={list.reload}>
             Refresh
@@ -510,7 +345,7 @@ export const DeviceMainScreen = ({
           <span className="ai-banner-text">
             <SparklesIcon size={16} />
             Smart results for <b>“{aiQuery}”</b> — {aiResults!.length} matches,
-            {rerank ? " re-ranked by the local LLM" : " ranked by meaning"}
+            ranked by meaning
           </span>
           <Button size="small" onClick={clearAi}>
             Clear
@@ -544,7 +379,7 @@ export const DeviceMainScreen = ({
           {showingAi ? (
             <Table<Device>
               rowKey="serial_number"
-              columns={[relevanceColumn, ...columns]}
+              columns={[relevanceCol, ...columns]}
               dataSource={aiResults!}
               loading={aiLoading}
               pagination={false}
@@ -612,8 +447,6 @@ export const DeviceMainScreen = ({
         setShowImport(false);
         list.reload();
       }} />}
-
-      <AssistantModal open={showAssistant} onClose={() => setShowAssistant(false)} />
     </>
   );
 };

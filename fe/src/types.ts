@@ -44,13 +44,11 @@ export const DEVICE_STATUS_ORDER: DeviceStatus[] = [
 // Fields accepted when creating a device (serial_number required, rest optional).
 export type DeviceCreate = Pick<Device, 'serial_number'> & Partial<Omit<Device, 'serial_number'>>
 
-// A device plus its semantic-search relevance score (0–1), `document` — the
-// exact sentence the AI ranked it on (shown as proof) — and, when the LLM
-// reranker ran, its one-line `reason` for the placement.
+// A device plus its semantic-search relevance score (0–1) and `document` — the
+// exact sentence the embedder ranked it on.
 export type DeviceRanked = Device & {
   score: number
   document: string
-  reason?: string | null
 }
 
 export type User = {
@@ -85,6 +83,12 @@ export type Maintenance = {
 export type MaintenanceCreate = Pick<Maintenance, 'maintenance_id'> &
   Partial<Omit<Maintenance, 'maintenance_id'>>
 
+// A maintenance record plus its semantic-search relevance score (0–1).
+export type MaintenanceRanked = Maintenance & {
+  score: number
+  document: string
+}
+
 export type Handover = {
   handover_id: string
   handover_date: string | null
@@ -96,6 +100,12 @@ export type Handover = {
 
 export type HandoverCreate = Pick<Handover, 'handover_id'> &
   Partial<Omit<Handover, 'handover_id'>>
+
+// A handover record plus its semantic-search relevance score (0–1).
+export type HandoverRanked = Handover & {
+  score: number
+  document: string
+}
 
 export const teamsOptions = [
     { team_id: "ESG", team_name: "ESG" },

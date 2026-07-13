@@ -52,19 +52,3 @@ CREATE TABLE user_devices (
     device_id VARCHAR(100) REFERENCES devices(serial_number),
     PRIMARY KEY (user_id, device_id)
 );
-
--- Smart-search relevance feedback: each row is a user marking a result right
--- (label=1) or wrong (label=0) for a query. Trains / steers the LLM reranker
--- and exports to the LoRA dataset. No FK to devices so labels survive a purge.
--- Also created at app startup (see main.py) for already-running databases.
-CREATE TABLE IF NOT EXISTS search_feedback (
-    id BIGSERIAL PRIMARY KEY,
-    query TEXT NOT NULL,
-    device_id VARCHAR(100),
-    document TEXT,
-    score DOUBLE PRECISION,
-    label SMALLINT NOT NULL DEFAULT 1,
-    created_at TIMESTAMP NOT NULL DEFAULT now()
-);
-CREATE INDEX IF NOT EXISTS idx_search_feedback_query
-    ON search_feedback (lower(query));

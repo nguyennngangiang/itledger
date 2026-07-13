@@ -6,21 +6,10 @@ import { pageQuery } from './paging'
 import type { Paged, PageParams } from './paging'
 
 // Natural-language semantic search, ranked by the local embedding service.
-// `rerank` runs the local LLM over the top hits (learns from marked feedback).
-export function semanticSearchDevices(q: string, limit = 30, rerank = false) {
+export function semanticSearchDevices(q: string, limit = 30) {
   return request<DeviceRanked[]>(
-    `/devices/semantic-search?q=${encodeURIComponent(q)}&limit=${limit}${
-      rerank ? '&rerank=true' : ''
-    }`,
+    `/devices/semantic-search?q=${encodeURIComponent(q)}&limit=${limit}`,
   )
-}
-
-// LLM one-liner explaining why a device matched the query (proof card).
-export function explainMatch(query: string, document: string) {
-  return request<{ explanation: string }>('/devices/explain', {
-    method: 'POST',
-    body: JSON.stringify({ query, document }),
-  })
 }
 
 export function listDevices(userId?: string) {
