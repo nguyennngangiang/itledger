@@ -34,28 +34,40 @@ fe/                 React 19 + Vite 8 + TypeScript, Ant Design 6, Tailwind 4
 
 ## Run it
 
-**Backend + DB (Docker):** from `be/`, `docker compose up`. Postgres listens on
-`5432`, the API on `8000` (`/docs` for Swagger). The API container hot-reloads
-via the mounted repo. `schema.sql` only runs on a fresh volume — after schema
-edits, recreate: `docker compose down -v && docker compose up`.
+**Backend + DB (Docker):** from `be/`, `docker compose up` starts Postgres
+(`5432`) and the API (`8000`, `/docs` for Swagger). The AI stack (embedder +
+Ollama) runs on the **host**, not in Docker (see below) — the API reaches it at
+`AI_URL=http://host.docker.internal:8001`. Both containers hot-reload via the
+mounted repo. `schema.sql` only runs on a fresh volume — after schema edits,
+recreate: `docker compose down -v && docker compose up`.
 
 **Seed sample data:** `python -m be.seed` (needs `DATABASE_URL`, or run inside
 the api container). Idempotent.
 
-**AI service (host, NPU):** runs on the Windows host — NOT in Docker — so it can
-use the Intel NPU (containers can't reach it). Start it with
-`powershell -ExecutionPolicy Bypass -File ai\run-host.ps1` (serves `:8001`,
-`/health` reports the bound `device`). It compiles the model with OpenVINO,
-preferring **NPU → GPU → CPU** (`EMBED_DEVICES`); the NPU needs the static
-[1, 128] reshape done in `main.py`. Model files live in `ai/.models` (already
-present; a fresh machine can copy them from a teammate or re-download the
-`qdrant/bge-small-en-v1.5-onnx-q` repo). The Docker `api` reaches it via
-`AI_URL=http://host.docker.internal:8001`.
+**AI service (host, NPU):** the embedding service runs on the Windows host so it
+can use the Intel **NPU** (a container can't reach it). `npm run dev` from `fe/`
+launches it (or run it alone with `npm run dev:ai` /
+`powershell -ExecutionPolicy Bypass -File ai\run-host.ps1`). It serves `:8001`
+and compiles the bge-small-en-v1.5 ONNX model with OpenVINO, preferring
+**NPU → GPU → CPU** (`EMBED_DEVICES`); the static [1, 128] reshape in `main.py`
+is what lets the NPU run it. `/health` reports the bound `device`. Model files
+live in `ai/.models` (already present; a fresh machine can copy them from a
+teammate or re-download the `qdrant/bge-small-en-v1.5-onnx-q` repo).
 
-**Frontend (Vite dev server):** from `fe/`, `npm install` then `npm run dev`
-(http://localhost:5173). It calls the API at `VITE_API_URL` (default
-`http://localhost:8000`). `npm run build` type-checks (`tsc -b`) then builds;
-run it to verify TS changes. `npm run lint` for ESLint.
+**Ollama (LLM, host):** the generative features (`/explain`, `/rerank`, `/chat`
+on the AI service) proxy a local **Ollama** LLM (`qwen2.5:7b`) also running on
+the host at `:11434`. `npm run dev` starts it headless (no standalone GUI) via
+`ai\run-ollama.ps1` — which reuses an already-running Ollama if one is up. Models
+live in `~/.ollama` (persist across restarts); pull with `ollama pull qwen2.5:7b`
+if missing. `/llm/health` on the AI service reports whether it's reachable/pulled.
+
+**Frontend + AI stack (`npm run dev`):** from `fe/`, `npm install` then
+`npm run dev` (http://localhost:5173) — this runs **Vite + the host AI embedder
+(:8001) + Ollama (:11434)** together via `concurrently` (see `dev:*` scripts).
+Vite calls the API at `VITE_API_URL` (default `http://localhost:8000`). So the
+full local stack is `docker compose up` (DB + API) plus `npm run dev` (web + AI +
+LLM). `npm run build` type-checks (`tsc -b`) then builds; run it to verify TS
+changes. `npm run lint` for ESLint.
 
 ## Conventions
 
@@ -79,8 +91,8 @@ run it to verify TS changes. `npm run lint` for ESLint.
   device into a sentence (specs, owner team, repair count), calls the `ai`
   service `/rank`, and returns devices with a `score`. The Devices screen's
   "Smart" toggle renders the ranked results with a relevance meter. It's local
-  and offline — no external API. The embedder runs on the host via OpenVINO and
-  binds to the **Intel NPU** (see the AI service note above); the Docker API
+  and offline — no external API. The embedder runs on the host via OpenVINO,
+  preferring the **Intel NPU** (see the AI service note above); the Docker API
   calls it at `host.docker.internal:8001`.
 - **Owners.** Ownerless / in-stock devices belong to the ghost `IT-STORE` user
   (`GHOST_USER_CODE`). `resolveOwner` in `lib/format.ts` handles display.
