@@ -45,8 +45,8 @@ recreate: `docker compose down -v && docker compose up`.
 the api container). Idempotent.
 
 **AI service (host, NPU) — embedding only:** the AI service is an
-**embedding-only** semantic-search ranker (no generative LLM — Ollama was
-removed). It runs on the Windows host so it can use the Intel **NPU** (a
+**embedding-only** semantic-search ranker (the generative LLM lives elsewhere —
+see "LLM" below). It runs on the Windows host so it can use the Intel **NPU** (a
 container can't reach it). `npm run dev` from `fe/` launches it (or run it alone
 with `npm run dev:ai` /
 `powershell -ExecutionPolicy Bypass -File ai\run-host.ps1`). It serves `:8001`
@@ -58,6 +58,18 @@ prefixes (handled in `main.py`); pooling is attention-masked **mean** (not CLS).
 `/health` reports the bound `device`. Model files live in `ai/.models/e5-small/`
 (`model.onnx` + `tokenizer.json`, gitignored; a fresh machine downloads them from
 the `Xenova/multilingual-e5-small` HF repo — `onnx/model.onnx` + `tokenizer.json`).
+
+**LLM (generative — Ask AI, explain, rerank):** a separate **internal-network
+OpenAI-compatible** endpoint (not the embedder, not Ollama). The **backend** calls
+it directly via `be/llm.py` (chat completions + `explain`/`rerank`/`rerank_results`
+helpers). Config in `be/config.py` from `be/.env` (gitignored): `LLM_BASE_URL`,
+`LLM_API_KEY` (secret), `LLM_MODEL` — see `be/.env.example`. Powers `POST
+/assistant/ask` (fleet-grounded Q&A), `POST /assistant/explain` (why a result
+matched), and `?rerank=true` on the three `semantic-search` endpoints. **Learning is
+project-local**: marked-correct rows in this project's `search_feedback` table are
+injected as few-shot examples into the rerank/explain prompts — the shared model is
+**never** fine-tuned. If the LLM is unreachable, rerank falls back to semantic order
+and ask/explain return 503 (search still works).
 
 **Frontend + AI (`npm run dev`):** from `fe/`, `npm install` then `npm run dev`
 (http://localhost:5173) — this runs **Vite + the host AI embedder (:8001)**
@@ -91,9 +103,12 @@ for ESLint.
   maintenance: the repair story + device + team; handover: device + who
   gave/received + reason), calls the `ai` service `/rank`, and returns the rows
   with a `score`. Each screen's **"Smart"** toggle swaps the normal search for
-  the ranked results, rendered with the shared relevance meter
-  (`lib/relevance.tsx`). It's local and offline — no external API, no LLM. The
-  embedder runs on the host via OpenVINO, preferring the **Intel NPU** (see the
+  the ranked results, rendered with the shared relevance meter + "why matched"
+  proof popover (`lib/relevance.tsx` `useSmartProof`). Each screen also has an
+  **LLM rerank** toggle (`?rerank=true`) and a **mark-correct** button that feeds
+  `search_feedback` (project-local few-shot — see "LLM" above); the Devices screen
+  adds an **Ask AI** chat. The embedder itself is local/offline — no external API;
+  it runs on the host via OpenVINO, preferring the **Intel NPU** (see the
   AI service note above); the Docker API calls it at `host.docker.internal:8001`.
   The data is English but the team searches in Vietnamese, so each flattened
   document is **bilingually enriched** (`be/glossary.py` `bilingualize()`):
