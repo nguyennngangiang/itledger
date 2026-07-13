@@ -835,6 +835,71 @@
   left: 150%;
 }
 
+/* ============================================================
+   Running hollow outline on hover (prominent buttons)
+   A conic-gradient ring masked to the border, with a light arc
+   that runs around the edge. Angle is animated via @property.
+   ============================================================ */
+@property --btn-trace-angle {
+  syntax: "<angle>";
+  inherits: false;
+  initial-value: 0deg;
+}
+
+.app-shell .ant-btn-primary,
+.app-shell .ant-btn-default,
+.topnav-item,
+.quick-add-btn,
+.status-chip,
+.trash-toggle {
+  position: relative; /* anchor the ring (primary already relative) */
+}
+
+.app-shell .ant-btn-primary::before,
+.app-shell .ant-btn-default::before,
+.topnav-item::before,
+.quick-add-btn::before,
+.status-chip::before,
+.trash-toggle::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit; /* matches each button's own radius */
+  padding: 2px; /* ring thickness */
+  background: conic-gradient(
+    from var(--btn-trace-angle),
+    transparent 0 55%,
+    var(--accent) 72%,
+    #a855f7 86%,
+    transparent 100%
+  );
+  /* mask keeps only the padding ring → hollow centre */
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  opacity: 0;
+  transition: opacity 0.18s ease;
+  pointer-events: none;
+  z-index: 1; /* above bg, below the label */
+}
+
+.app-shell .ant-btn-primary:hover::before,
+.app-shell .ant-btn-default:hover::before,
+.topnav-item:hover::before,
+.quick-add-btn:hover::before,
+.status-chip:hover::before,
+.trash-toggle:hover::before {
+  opacity: 1;
+  animation: btn-trace-run 1.15s linear infinite;
+}
+
+@keyframes btn-trace-run {
+  to {
+    --btn-trace-angle: 360deg;
+  }
+}
+
 /* The brand logo gently pulses its glow */
 .topbar-logo {
   animation: logo-pulse 2.8s ease-in-out infinite;
@@ -867,6 +932,15 @@
   }
   .stat-card::after,
   .app-shell .ant-btn-primary::after {
+    display: none;
+  }
+  .app-shell .ant-btn-primary::before,
+  .app-shell .ant-btn-default::before,
+  .topnav-item::before,
+  .quick-add-btn::before,
+  .status-chip::before,
+  .trash-toggle::before {
+    animation: none;
     display: none;
   }
 }

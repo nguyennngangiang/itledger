@@ -48,7 +48,12 @@ createRoot(document.getElementById("root")!).render(
     >
       <LoadingProvider>
         <App />
-        <ToastContainer position="top-right" autoClose={2500} newestOnTop />
+        <ToastContainer
+          position="top-right"
+          autoClose={2500}
+          newestOnTop
+          style={{ top: "74px" }}
+        />
       </LoadingProvider>
     </ConfigProvider>
   </StrictMode>,
