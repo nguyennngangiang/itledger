@@ -35,8 +35,8 @@ fe/                 React 19 + Vite 8 + TypeScript, Ant Design 6, Tailwind 4
 ## Run it
 
 **Backend + DB (Docker):** from `be/`, `docker compose up` starts Postgres
-(`5432`) and the API (`8000`, `/docs` for Swagger). The AI stack (embedder +
-Ollama) runs on the **host**, not in Docker (see below) — the API reaches it at
+(`5432`) and the API (`8000`, `/docs` for Swagger). The AI embedder runs on the
+**host**, not in Docker (see below) — the API reaches it at
 `AI_URL=http://host.docker.internal:8001`. Both containers hot-reload via the
 mounted repo. `schema.sql` only runs on a fresh volume — after schema edits,
 recreate: `docker compose down -v && docker compose up`.
@@ -44,30 +44,28 @@ recreate: `docker compose down -v && docker compose up`.
 **Seed sample data:** `python -m be.seed` (needs `DATABASE_URL`, or run inside
 the api container). Idempotent.
 
-**AI service (host, NPU):** the embedding service runs on the Windows host so it
-can use the Intel **NPU** (a container can't reach it). `npm run dev` from `fe/`
-launches it (or run it alone with `npm run dev:ai` /
+**AI service (host, NPU) — embedding only:** the AI service is an
+**embedding-only** semantic-search ranker (no generative LLM — Ollama was
+removed). It runs on the Windows host so it can use the Intel **NPU** (a
+container can't reach it). `npm run dev` from `fe/` launches it (or run it alone
+with `npm run dev:ai` /
 `powershell -ExecutionPolicy Bypass -File ai\run-host.ps1`). It serves `:8001`
-and compiles the bge-small-en-v1.5 ONNX model with OpenVINO, preferring
-**NPU → GPU → CPU** (`EMBED_DEVICES`); the static [1, 128] reshape in `main.py`
-is what lets the NPU run it. `/health` reports the bound `device`. Model files
-live in `ai/.models` (already present; a fresh machine can copy them from a
-teammate or re-download the `qdrant/bge-small-en-v1.5-onnx-q` repo).
+with a single `POST /rank`, compiling the **multilingual-e5-small** ONNX model
+with OpenVINO, preferring **NPU → GPU → CPU** (`EMBED_DEVICES`); the static
+[1, 128] reshape in `main.py` is what lets the NPU run it. It's **multilingual**
+(~100 languages incl. Vietnamese) — e5 needs the `query: ` / `passage: `
+prefixes (handled in `main.py`); pooling is attention-masked **mean** (not CLS).
+`/health` reports the bound `device`. Model files live in `ai/.models/e5-small/`
+(`model.onnx` + `tokenizer.json`, gitignored; a fresh machine downloads them from
+the `Xenova/multilingual-e5-small` HF repo — `onnx/model.onnx` + `tokenizer.json`).
 
-**Ollama (LLM, host):** the generative features (`/explain`, `/rerank`, `/chat`
-on the AI service) proxy a local **Ollama** LLM (`qwen2.5:7b`) also running on
-the host at `:11434`. `npm run dev` starts it headless (no standalone GUI) via
-`ai\run-ollama.ps1` — which reuses an already-running Ollama if one is up. Models
-live in `~/.ollama` (persist across restarts); pull with `ollama pull qwen2.5:7b`
-if missing. `/llm/health` on the AI service reports whether it's reachable/pulled.
-
-**Frontend + AI stack (`npm run dev`):** from `fe/`, `npm install` then
-`npm run dev` (http://localhost:5173) — this runs **Vite + the host AI embedder
-(:8001) + Ollama (:11434)** together via `concurrently` (see `dev:*` scripts).
-Vite calls the API at `VITE_API_URL` (default `http://localhost:8000`). So the
-full local stack is `docker compose up` (DB + API) plus `npm run dev` (web + AI +
-LLM). `npm run build` type-checks (`tsc -b`) then builds; run it to verify TS
-changes. `npm run lint` for ESLint.
+**Frontend + AI (`npm run dev`):** from `fe/`, `npm install` then `npm run dev`
+(http://localhost:5173) — this runs **Vite + the host AI embedder (:8001)**
+together via `concurrently` (see `dev:*` scripts). Vite calls the API at
+`VITE_API_URL` (default `http://localhost:8000`). So the full local stack is
+`docker compose up` (DB + API) plus `npm run dev` (web + AI). `npm run build`
+type-checks (`tsc -b`) then builds; run it to verify TS changes. `npm run lint`
+for ESLint.
 
 ## Conventions
 
@@ -87,13 +85,20 @@ changes. `npm run lint` for ESLint.
   are matched to fields by normalized header name.
 - **Paginated tables.** `GET /<resource>/page` returns `{rows, total}`; the
   `usePagedList` hook drives an Ant `<Table>` (sort/search/paginate/trash).
-- **Semantic search.** `GET /devices/semantic-search?q=` flattens each active
-  device into a sentence (specs, owner team, repair count), calls the `ai`
-  service `/rank`, and returns devices with a `score`. The Devices screen's
-  "Smart" toggle renders the ranked results with a relevance meter. It's local
-  and offline — no external API. The embedder runs on the host via OpenVINO,
-  preferring the **Intel NPU** (see the AI service note above); the Docker API
-  calls it at `host.docker.internal:8001`.
+- **Semantic search.** `GET /<resource>/semantic-search?q=` exists for
+  **devices, maintenance and handovers**. Each flattens an active row into a
+  natural-language sentence (device: specs + owner team + repair count;
+  maintenance: the repair story + device + team; handover: device + who
+  gave/received + reason), calls the `ai` service `/rank`, and returns the rows
+  with a `score`. Each screen's **"Smart"** toggle swaps the normal search for
+  the ranked results, rendered with the shared relevance meter
+  (`lib/relevance.tsx`). It's local and offline — no external API, no LLM. The
+  embedder runs on the host via OpenVINO, preferring the **Intel NPU** (see the
+  AI service note above); the Docker API calls it at `host.docker.internal:8001`.
+  The data is English but the team searches in Vietnamese, so each flattened
+  document is **bilingually enriched** (`be/glossary.py` `bilingualize()`):
+  recognised English IT terms get their Vietnamese synonyms appended, so a
+  Vietnamese query matches same-language. Extend the glossary map for new terms.
 - **Owners.** Ownerless / in-stock devices belong to the ghost `IT-STORE` user
   (`GHOST_USER_CODE`). `resolveOwner` in `lib/format.ts` handles display.
 - **Animation (anime.js).** `lib/sparkle.ts` owns motion: click sparkle bursts,
