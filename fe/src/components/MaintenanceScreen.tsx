@@ -7,15 +7,17 @@ import {
   deleteMaintenance,
   deleteMaintenanceBatch,
   restoreMaintenance,
+  semanticSearchMaintenance,
 } from "../api/maintenance";
 import { listDevices } from "../api/devices";
 import { listUsers } from "../api/users";
-import type { Maintenance, Device, User } from "../types";
+import type { Maintenance, MaintenanceRanked, Device, User } from "../types";
 import { ConfirmModal } from "./Modal/ConfirmModal";
 import { BulkDeleteBar } from "./BulkDeleteBar";
 import { TrashToggle } from "./TrashToggle";
 import MaintenanceModal from "./Modal/MaintenanceModal";
-import { PlusIcon, RefreshIcon, SearchIcon, InfoIcon, TrashIcon, EditIcon } from "./icons";
+import { PlusIcon, RefreshIcon, SearchIcon, InfoIcon, TrashIcon, EditIcon, SparklesIcon } from "./icons";
+import { relevanceColumn } from "../lib/relevance";
 import { formatDate, resolveOwner, toUserMap } from "../lib/format";
 import { usePagedList } from "../lib/usePagedList";
 import { TABLE_SCROLL } from "../lib/table";
@@ -34,6 +36,42 @@ export const MaintenanceScreen = ({
   const [editTarget, setEditTarget] = useState<Maintenance | null>(null);
   const [selectedKeys, setSelectedKeys] = useState<string[]>([]);
   const [bulkConfirm, setBulkConfirm] = useState(false);
+  // Smart (semantic) search: when aiResults !== null the table shows ranked hits.
+  const [smart, setSmart] = useState(false);
+  const [aiResults, setAiResults] = useState<MaintenanceRanked[] | null>(null);
+  const [aiQuery, setAiQuery] = useState("");
+  const [aiLoading, setAiLoading] = useState(false);
+
+  const showingAi = aiResults !== null;
+
+  const clearAi = () => {
+    setAiResults(null);
+    setAiQuery("");
+  };
+
+  const runSearch = async () => {
+    const q = searchText.trim();
+    if (!smart) {
+      list.applySearch(q);
+      return;
+    }
+    if (!q) {
+      clearAi();
+      return;
+    }
+    setAiLoading(true);
+    try {
+      const res = await semanticSearchMaintenance(q, 30);
+      setAiResults(res);
+      setAiQuery(q);
+    } catch (e) {
+      toast.error("Smart search failed: " + e);
+    } finally {
+      setAiLoading(false);
+    }
+  };
+
+  const relevanceCol = relevanceColumn<Maintenance>();
 
   const list = usePagedList<Maintenance>(pageMaintenance, {
     defaultOrderBy: "maintenance_date",
@@ -215,16 +253,35 @@ export const MaintenanceScreen = ({
         <div className="screen-search">
           <Input
             allowClear
-            prefix={<SearchIcon size={16} />}
-            placeholder="Search maintenance… (Enter)"
-            style={{ width: 300 }}
+            prefix={smart ? <SparklesIcon size={16} /> : <SearchIcon size={16} />}
+            placeholder={
+              smart
+                ? "Describe the repair you're looking for… (Enter)"
+                : "Search maintenance… (Enter)"
+            }
+            style={{ width: 320 }}
             value={searchText}
             onChange={(e) => {
               setSearchText(e.target.value);
-              if (e.target.value === "") list.applySearch("");
+              if (e.target.value === "") {
+                if (smart) clearAi();
+                else list.applySearch("");
+              }
             }}
-            onPressEnter={() => list.applySearch(searchText)}
+            onPressEnter={runSearch}
           />
+          <Button
+            type={smart ? "primary" : "default"}
+            icon={<SparklesIcon size={16} />}
+            title="AI semantic search — search by meaning, not keywords"
+            onClick={() => {
+              const next = !smart;
+              setSmart(next);
+              if (!next) clearAi();
+            }}
+          >
+            {smart ? "Smart: on" : "Smart"}
+          </Button>
         </div>
         <div className="toolbar-actions">
           <TrashToggle trashed={list.trashed} onToggle={list.toggleTrash} />
@@ -237,10 +294,27 @@ export const MaintenanceScreen = ({
         </div>
       </div>
 
+      {showingAi && (
+        <div className="ai-banner">
+          <span className="ai-banner-text">
+            <SparklesIcon size={16} />
+            Smart results for <b>“{aiQuery}”</b> — {aiResults!.length} matches,
+            ranked by meaning
+          </span>
+          <Button size="small" onClick={clearAi}>
+            Clear
+          </Button>
+        </div>
+      )}
+
       <div className="panel">
         <div className="panel-head">
           <span className="panel-title">
-            {list.trashed ? "Trash" : "Maintenance records"}
+            {showingAi
+              ? "Smart results"
+              : list.trashed
+              ? "Trash"
+              : "Maintenance records"}
           </span>
           {selectedKeys.length > 0 ? (
             <BulkDeleteBar
@@ -250,20 +324,37 @@ export const MaintenanceScreen = ({
               onClear={() => setSelectedKeys([])}
             />
           ) : (
-            <span className="panel-count">{list.total} total</span>
+            <span className="panel-count">
+              {showingAi ? `${aiResults!.length} matches` : `${list.total} total`}
+            </span>
           )}
         </div>
         <div className="table-wrap">
-          <Table<Maintenance>
-            rowKey="maintenance_id"
-            columns={columns}
-            scroll={TABLE_SCROLL}
-            rowSelection={{
-              selectedRowKeys: selectedKeys,
-              onChange: (keys) => setSelectedKeys(keys as string[]),
-            }}
-            {...list.tableProps}
-          />
+          {showingAi ? (
+            <Table<Maintenance>
+              rowKey="maintenance_id"
+              columns={[relevanceCol, ...columns]}
+              dataSource={aiResults!}
+              loading={aiLoading}
+              pagination={false}
+              scroll={TABLE_SCROLL}
+              rowSelection={{
+                selectedRowKeys: selectedKeys,
+                onChange: (keys) => setSelectedKeys(keys as string[]),
+              }}
+            />
+          ) : (
+            <Table<Maintenance>
+              rowKey="maintenance_id"
+              columns={columns}
+              scroll={TABLE_SCROLL}
+              rowSelection={{
+                selectedRowKeys: selectedKeys,
+                onChange: (keys) => setSelectedKeys(keys as string[]),
+              }}
+              {...list.tableProps}
+            />
+          )}
         </div>
       </div>
 

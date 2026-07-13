@@ -1,7 +1,14 @@
 import { request } from './client'
-import type { Handover, HandoverCreate } from '../types'
+import type { Handover, HandoverCreate, HandoverRanked } from '../types'
 import { pageQuery } from './paging'
 import type { Paged, PageParams } from './paging'
+
+// Natural-language semantic search, ranked by the local embedding service.
+export function semanticSearchHandovers(q: string, limit = 30) {
+  return request<HandoverRanked[]>(
+    `/handovers/semantic-search?q=${encodeURIComponent(q)}&limit=${limit}`,
+  )
+}
 
 export function listHandovers(deviceId?: string, fromUserId?: string, toUserId?: string) {
   const params = new URLSearchParams()

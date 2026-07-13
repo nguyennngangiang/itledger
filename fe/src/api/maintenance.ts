@@ -1,7 +1,14 @@
 import { request } from './client'
-import type { Maintenance, MaintenanceCreate } from '../types'
+import type { Maintenance, MaintenanceCreate, MaintenanceRanked } from '../types'
 import { pageQuery } from './paging'
 import type { Paged, PageParams } from './paging'
+
+// Natural-language semantic search, ranked by the local embedding service.
+export function semanticSearchMaintenance(q: string, limit = 30) {
+  return request<MaintenanceRanked[]>(
+    `/maintenance/semantic-search?q=${encodeURIComponent(q)}&limit=${limit}`,
+  )
+}
 
 export function listMaintenance(deviceId?: string, team?: string) {
   const params = new URLSearchParams()

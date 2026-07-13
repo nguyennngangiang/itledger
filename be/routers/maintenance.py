@@ -3,12 +3,17 @@
 Parse the request, call the repository, translate domain errors / missing rows
 to HTTP status codes. No SQL here — that lives in repositories/maintenance.py.
 """
+import httpx
 from fastapi import APIRouter, Body, Depends, HTTPException
 from pydantic import BaseModel
 
+from ..config import settings
 from ..db import get_pool
+from ..glossary import bilingualize
 from ..models.maintenance import MaintenanceCreate, MaintenanceOut, MaintenanceUpdate
 from ..repositories import maintenance as repo
+from ..repositories import device as device_repo
+from ..repositories import user as user_repo
 from ..repositories.errors import DuplicateError, ForeignKeyError
 
 router = APIRouter(prefix="/maintenance", tags=["maintenance"])
@@ -17,6 +22,34 @@ router = APIRouter(prefix="/maintenance", tags=["maintenance"])
 class MaintenancePage(BaseModel):
     rows: list[MaintenanceOut]
     total: int
+
+
+class MaintenanceRanked(MaintenanceOut):
+    """A maintenance record plus its semantic-similarity score (0–1) and the
+    exact sentence the embedder ranked it on (`document`)."""
+    score: float
+    document: str
+
+
+def _maintenance_document(m: dict, devices: dict, users: dict) -> str:
+    """Flatten a maintenance record into a short natural-language line for
+    embedding — its repair story plus the device it belongs to and owner team."""
+    device = devices.get(m.get("device_id")) if m.get("device_id") else None
+    team = (users.get((device or {}).get("user_id")) or {}).get("team") if device else None
+    date = m.get("maintenance_date")
+    cost = m.get("cost_vnd")
+    parts = [
+        (device or {}).get("name") or m.get("device_id"),
+        f"part {m['part']}" if m.get("part") else None,
+        f"problem: {m['reason']}" if m.get("reason") else None,
+        f"solution: {m['solution']}" if m.get("solution") else None,
+        f"result: {m['result']}" if m.get("result") else None,
+        m.get("remarks"),
+        f"{team} team" if team else (f"team {m['team']}" if m.get("team") else None),
+        f"cost {cost} VND" if cost else None,
+        f"repaired {date.year}" if date else None,
+    ]
+    return bilingualize(", ".join(str(p) for p in parts if p))
 
 
 @router.post("", response_model=MaintenanceOut, status_code=201)
@@ -72,6 +105,46 @@ async def page_maintenance(
 @router.get("/search", response_model=list[MaintenanceOut])
 async def search_maintenance(q: str, pool=Depends(get_pool)):
     return await repo.search(pool, q)
+
+
+@router.get("/semantic-search", response_model=list[MaintenanceRanked])
+async def semantic_search(q: str, limit: int = 20, pool=Depends(get_pool)):
+    """Rank active maintenance records by how well they match a natural-language
+    query, using the local embedding service. Declared before /{maintenance_id}
+    so "semantic-search" isn't read as an id."""
+    records = await repo.list_maintenance(pool)
+    if not records:
+        return []
+
+    devices = {d["serial_number"]: d for d in await device_repo.list_devices(pool)}
+    users = {u["employee_code"]: u for u in await user_repo.list_users(pool)}
+    documents = [
+        {"id": m["maintenance_id"], "text": _maintenance_document(m, devices, users)}
+        for m in records
+    ]
+    text_by_id = {doc["id"]: doc["text"] for doc in documents}
+
+    try:
+        async with httpx.AsyncClient(timeout=30) as client:
+            resp = await client.post(
+                f"{settings.ai_url}/rank",
+                json={"query": q, "documents": documents, "top_k": limit},
+            )
+            resp.raise_for_status()
+            ranked = resp.json()
+    except httpx.HTTPError as e:
+        raise HTTPException(503, f"AI search service unavailable: {e}")
+
+    by_id = {m["maintenance_id"]: m for m in records}
+    return [
+        {
+            **by_id[r["id"]],
+            "score": round(r["score"], 4),
+            "document": text_by_id[r["id"]],
+        }
+        for r in ranked
+        if r["id"] in by_id
+    ]
 
 
 @router.post("/{maintenance_id}/restore", response_model=MaintenanceOut)
