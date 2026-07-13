@@ -4,9 +4,12 @@ import { pageQuery } from './paging'
 import type { Paged, PageParams } from './paging'
 
 // Natural-language semantic search, ranked by the local embedding service.
-export function semanticSearchHandovers(q: string, limit = 30) {
+// `rerank` re-sorts the top hits with the LLM (learns from marked feedback).
+export function semanticSearchHandovers(q: string, limit = 30, rerank = false) {
   return request<HandoverRanked[]>(
-    `/handovers/semantic-search?q=${encodeURIComponent(q)}&limit=${limit}`,
+    `/handovers/semantic-search?q=${encodeURIComponent(q)}&limit=${limit}${
+      rerank ? '&rerank=true' : ''
+    }`,
   )
 }
 

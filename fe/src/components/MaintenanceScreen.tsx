@@ -16,8 +16,8 @@ import { ConfirmModal } from "./Modal/ConfirmModal";
 import { BulkDeleteBar } from "./BulkDeleteBar";
 import { TrashToggle } from "./TrashToggle";
 import MaintenanceModal from "./Modal/MaintenanceModal";
-import { PlusIcon, RefreshIcon, SearchIcon, InfoIcon, TrashIcon, EditIcon, SparklesIcon } from "./icons";
-import { relevanceColumn } from "../lib/relevance";
+import { PlusIcon, RefreshIcon, SearchIcon, InfoIcon, TrashIcon, EditIcon, SparklesIcon, ProveIcon } from "./icons";
+import { useSmartProof } from "../lib/relevance";
 import { formatDate, resolveOwner, toUserMap } from "../lib/format";
 import { usePagedList } from "../lib/usePagedList";
 import { TABLE_SCROLL } from "../lib/table";
@@ -38,11 +38,18 @@ export const MaintenanceScreen = ({
   const [bulkConfirm, setBulkConfirm] = useState(false);
   // Smart (semantic) search: when aiResults !== null the table shows ranked hits.
   const [smart, setSmart] = useState(false);
+  const [rerank, setRerank] = useState(false); // LLM re-sort of smart results
   const [aiResults, setAiResults] = useState<MaintenanceRanked[] | null>(null);
   const [aiQuery, setAiQuery] = useState("");
   const [aiLoading, setAiLoading] = useState(false);
 
   const showingAi = aiResults !== null;
+
+  const { proofColumn } = useSmartProof<Maintenance>({
+    resource: "maintenance",
+    query: aiQuery,
+    idOf: (m) => m.maintenance_id,
+  });
 
   const clearAi = () => {
     setAiResults(null);
@@ -61,7 +68,7 @@ export const MaintenanceScreen = ({
     }
     setAiLoading(true);
     try {
-      const res = await semanticSearchMaintenance(q, 30);
+      const res = await semanticSearchMaintenance(q, 30, rerank);
       setAiResults(res);
       setAiQuery(q);
     } catch (e) {
@@ -70,8 +77,6 @@ export const MaintenanceScreen = ({
       setAiLoading(false);
     }
   };
-
-  const relevanceCol = relevanceColumn<Maintenance>();
 
   const list = usePagedList<Maintenance>(pageMaintenance, {
     defaultOrderBy: "maintenance_date",
@@ -282,6 +287,16 @@ export const MaintenanceScreen = ({
           >
             {smart ? "Smart: on" : "Smart"}
           </Button>
+          {smart && (
+            <Button
+              type={rerank ? "primary" : "default"}
+              icon={<ProveIcon size={16} />}
+              title="Re-rank smart results with the LLM — it learns from your marks"
+              onClick={() => setRerank((v) => !v)}
+            >
+              {rerank ? "LLM rerank: on" : "LLM rerank"}
+            </Button>
+          )}
         </div>
         <div className="toolbar-actions">
           <TrashToggle trashed={list.trashed} onToggle={list.toggleTrash} />
@@ -299,7 +314,7 @@ export const MaintenanceScreen = ({
           <span className="ai-banner-text">
             <SparklesIcon size={16} />
             Smart results for <b>“{aiQuery}”</b> — {aiResults!.length} matches,
-            ranked by meaning
+            {rerank ? " re-ranked by the LLM" : " ranked by meaning"}
           </span>
           <Button size="small" onClick={clearAi}>
             Clear
@@ -333,7 +348,7 @@ export const MaintenanceScreen = ({
           {showingAi ? (
             <Table<Maintenance>
               rowKey="maintenance_id"
-              columns={[relevanceCol, ...columns]}
+              columns={[proofColumn, ...columns]}
               dataSource={aiResults!}
               loading={aiLoading}
               pagination={false}

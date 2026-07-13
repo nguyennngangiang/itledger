@@ -6,9 +6,12 @@ import { pageQuery } from './paging'
 import type { Paged, PageParams } from './paging'
 
 // Natural-language semantic search, ranked by the local embedding service.
-export function semanticSearchDevices(q: string, limit = 30) {
+// `rerank` re-sorts the top hits with the LLM (learns from marked feedback).
+export function semanticSearchDevices(q: string, limit = 30, rerank = false) {
   return request<DeviceRanked[]>(
-    `/devices/semantic-search?q=${encodeURIComponent(q)}&limit=${limit}`,
+    `/devices/semantic-search?q=${encodeURIComponent(q)}&limit=${limit}${
+      rerank ? '&rerank=true' : ''
+    }`,
   )
 }
 

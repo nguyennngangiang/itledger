@@ -26,8 +26,10 @@ import {
   InfoIcon,
   UploadIcon,
   SparklesIcon,
+  ProveIcon,
 } from "./icons";
-import { relevanceColumn } from "../lib/relevance";
+import { useSmartProof } from "../lib/relevance";
+import { AssistantModal } from "./Modal/AssistantModal";
 import { formatDate, resolveOwner, toUserMap } from "../lib/format";
 import { usePagedList } from "../lib/usePagedList";
 import { TABLE_SCROLL } from "../lib/table";
@@ -52,11 +54,19 @@ export const DeviceMainScreen = ({
   // Smart (semantic) search state. When aiResults !== null the table shows the
   // ranked results instead of the normal paged list.
   const [smart, setSmart] = useState(false);
+  const [rerank, setRerank] = useState(false); // LLM re-sort of smart results
   const [aiResults, setAiResults] = useState<DeviceRanked[] | null>(null);
   const [aiQuery, setAiQuery] = useState("");
   const [aiLoading, setAiLoading] = useState(false);
+  const [showAssistant, setShowAssistant] = useState(false);
 
   const showingAi = aiResults !== null;
+
+  const { proofColumn } = useSmartProof<Device>({
+    resource: "devices",
+    query: aiQuery,
+    idOf: (d) => d.serial_number,
+  });
 
   const clearAi = () => {
     setAiResults(null);
@@ -75,7 +85,7 @@ export const DeviceMainScreen = ({
     }
     setAiLoading(true);
     try {
-      const res = await semanticSearchDevices(q, 30);
+      const res = await semanticSearchDevices(q, 30, rerank);
       setAiResults(res);
       setAiQuery(q);
     } catch (e) {
@@ -263,9 +273,6 @@ export const DeviceMainScreen = ({
     },
   ];
 
-  // Relevance meter shown as the first column in smart-search results.
-  const relevanceCol = relevanceColumn<Device>();
-
   const statusChips: StatusFilter[] = ["all", ...DEVICE_STATUS_ORDER];
 
   return (
@@ -305,8 +312,25 @@ export const DeviceMainScreen = ({
           >
             {smart ? "Smart: on" : "Smart"}
           </Button>
+          {smart && (
+            <Button
+              type={rerank ? "primary" : "default"}
+              icon={<ProveIcon size={16} />}
+              title="Re-rank smart results with the LLM — it learns from your marks"
+              onClick={() => setRerank((v) => !v)}
+            >
+              {rerank ? "LLM rerank: on" : "LLM rerank"}
+            </Button>
+          )}
         </div>
         <div className="toolbar-actions">
+          <Button
+            icon={<SparklesIcon size={16} />}
+            onClick={() => setShowAssistant(true)}
+            title="Ask the AI about your fleet"
+          >
+            Ask AI
+          </Button>
           <TrashToggle trashed={list.trashed} onToggle={list.toggleTrash} />
           <Button icon={<RefreshIcon size={16} />} onClick={list.reload}>
             Refresh
@@ -345,7 +369,7 @@ export const DeviceMainScreen = ({
           <span className="ai-banner-text">
             <SparklesIcon size={16} />
             Smart results for <b>“{aiQuery}”</b> — {aiResults!.length} matches,
-            ranked by meaning
+            {rerank ? " re-ranked by the LLM" : " ranked by meaning"}
           </span>
           <Button size="small" onClick={clearAi}>
             Clear
@@ -379,7 +403,7 @@ export const DeviceMainScreen = ({
           {showingAi ? (
             <Table<Device>
               rowKey="serial_number"
-              columns={[relevanceCol, ...columns]}
+              columns={[proofColumn, ...columns]}
               dataSource={aiResults!}
               loading={aiLoading}
               pagination={false}
@@ -447,6 +471,8 @@ export const DeviceMainScreen = ({
         setShowImport(false);
         list.reload();
       }} />}
+
+      <AssistantModal open={showAssistant} onClose={() => setShowAssistant(false)} />
     </>
   );
 };

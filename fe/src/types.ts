@@ -49,6 +49,7 @@ export type DeviceCreate = Pick<Device, 'serial_number'> & Partial<Omit<Device, 
 export type DeviceRanked = Device & {
   score: number
   document: string
+  reason?: string | null
 }
 
 export type User = {
@@ -87,6 +88,7 @@ export type MaintenanceCreate = Pick<Maintenance, 'maintenance_id'> &
 export type MaintenanceRanked = Maintenance & {
   score: number
   document: string
+  reason?: string | null
 }
 
 export type Handover = {
@@ -105,6 +107,7 @@ export type HandoverCreate = Pick<Handover, 'handover_id'> &
 export type HandoverRanked = Handover & {
   score: number
   document: string
+  reason?: string | null
 }
 
 export const teamsOptions = [

@@ -4,9 +4,12 @@ import { pageQuery } from './paging'
 import type { Paged, PageParams } from './paging'
 
 // Natural-language semantic search, ranked by the local embedding service.
-export function semanticSearchMaintenance(q: string, limit = 30) {
+// `rerank` re-sorts the top hits with the LLM (learns from marked feedback).
+export function semanticSearchMaintenance(q: string, limit = 30, rerank = false) {
   return request<MaintenanceRanked[]>(
-    `/maintenance/semantic-search?q=${encodeURIComponent(q)}&limit=${limit}`,
+    `/maintenance/semantic-search?q=${encodeURIComponent(q)}&limit=${limit}${
+      rerank ? '&rerank=true' : ''
+    }`,
   )
 }
 
