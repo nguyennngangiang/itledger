@@ -59,6 +59,98 @@ async def chat(system: str, user: str, *, temperature: float = 0.3, timeout: flo
         raise HTTPException(503, f"LLM unavailable: {e}")
 
 
+async def chat_agent(
+    system: str,
+    messages: list[dict],
+    tools: list[dict],
+    dispatch,
+    *,
+    max_steps: int = 6,
+    temperature: float = 0.2,
+    timeout: float = 240,
+) -> str:
+    """Agentic chat. The model may call `tools` — each executed via
+    `await dispatch(name, args)` which returns a text result — across up to
+    `max_steps` rounds, then returns its final answer.
+
+    `messages` is the prior conversation (already role-mapped, no system message).
+    Grounding baseline lives in `system`, so this degrades gracefully: if the
+    server ignores tool-calling (returns content on the first turn) we still get a
+    grounded answer, and if it rejects the `tools` param outright (HTTP 400) we
+    retry toolless. Raises HTTPException(503) only when the LLM is unreachable."""
+    convo: list[dict] = [{"role": "system", "content": system}, *messages]
+    headers = {"Content-Type": "application/json"}
+    if settings.llm_api_key:
+        headers["Authorization"] = f"Bearer {settings.llm_api_key}"
+    url = f"{settings.llm_base_url}/chat/completions"
+    use_tools = True
+
+    async with httpx.AsyncClient(timeout=timeout) as client:
+        for _ in range(max_steps):
+            body: dict = {
+                "model": settings.llm_model,
+                "messages": convo,
+                "temperature": temperature,
+                "stream": False,
+            }
+            if use_tools:
+                body["tools"] = tools
+                body["tool_choice"] = "auto"
+            try:
+                resp = await client.post(url, json=body, headers=headers)
+                if use_tools and resp.status_code == 400:
+                    use_tools = False  # server can't do tool-calling — stay grounded, drop tools
+                    continue
+                resp.raise_for_status()
+                msg = resp.json()["choices"][0]["message"]
+            except httpx.HTTPError as e:  # noqa: BLE001
+                raise HTTPException(503, f"LLM unavailable: {e}")
+
+            tool_calls = (msg.get("tool_calls") or []) if use_tools else []
+            if not tool_calls:
+                return (msg.get("content") or "").strip()
+
+            convo.append(msg)  # the assistant turn that requested the tool calls
+            for call in tool_calls:
+                fn = call.get("function", {})
+                try:
+                    args = json.loads(fn.get("arguments") or "{}")
+                except json.JSONDecodeError:
+                    args = {}
+                try:
+                    result = await dispatch(fn.get("name", ""), args)
+                except Exception as e:  # noqa: BLE001 — a tool failure is data for the model
+                    result = f"error: {e}"
+                convo.append({
+                    "role": "tool",
+                    "tool_call_id": call.get("id"),
+                    "content": result if isinstance(result, str)
+                    else json.dumps(result, default=str),
+                })
+
+        # Steps exhausted: one final toolless pass to force a summary answer.
+        convo.append({
+            "role": "user",
+            "content": "Answer now using the information already gathered above. "
+            "Do not request any more tools.",
+        })
+        try:
+            resp = await client.post(
+                url,
+                json={
+                    "model": settings.llm_model,
+                    "messages": convo,
+                    "temperature": temperature,
+                    "stream": False,
+                },
+                headers=headers,
+            )
+            resp.raise_for_status()
+            return (resp.json()["choices"][0]["message"].get("content") or "").strip()
+        except httpx.HTTPError as e:  # noqa: BLE001
+            raise HTTPException(503, f"LLM unavailable: {e}")
+
+
 async def explain(query: str, document: str) -> str:
     """One-sentence, grounded 'why this record matched the search'."""
     system = (

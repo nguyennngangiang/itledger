@@ -3,13 +3,12 @@
 Parse the request, call the repository, translate domain errors / missing rows
 to HTTP status codes. No SQL here — that lives in repositories/maintenance.py.
 """
-import httpx
 from fastapi import APIRouter, Body, Depends, HTTPException
 from pydantic import BaseModel
 
-from ..config import settings
 from ..db import get_pool
-from ..glossary import bilingualize
+from ..documents import maintenance_document
+from ..search import rank
 from .. import llm
 from ..models.maintenance import MaintenanceCreate, MaintenanceOut, MaintenanceUpdate
 from ..repositories import maintenance as repo
@@ -33,27 +32,6 @@ class MaintenanceRanked(MaintenanceOut):
     score: float
     document: str
     reason: str | None = None
-
-
-def _maintenance_document(m: dict, devices: dict, users: dict) -> str:
-    """Flatten a maintenance record into a short natural-language line for
-    embedding — its repair story plus the device it belongs to and owner team."""
-    device = devices.get(m.get("device_id")) if m.get("device_id") else None
-    team = (users.get((device or {}).get("user_id")) or {}).get("team") if device else None
-    date = m.get("maintenance_date")
-    cost = m.get("cost_vnd")
-    parts = [
-        (device or {}).get("name") or m.get("device_id"),
-        f"part {m['part']}" if m.get("part") else None,
-        f"problem: {m['reason']}" if m.get("reason") else None,
-        f"solution: {m['solution']}" if m.get("solution") else None,
-        f"result: {m['result']}" if m.get("result") else None,
-        m.get("remarks"),
-        f"{team} team" if team else (f"team {m['team']}" if m.get("team") else None),
-        f"cost {cost} VND" if cost else None,
-        f"repaired {date.year}" if date else None,
-    ]
-    return bilingualize(", ".join(str(p) for p in parts if p))
 
 
 @router.post("", response_model=MaintenanceOut, status_code=201)
@@ -126,21 +104,12 @@ async def semantic_search(
     devices = {d["serial_number"]: d for d in await device_repo.list_devices(pool)}
     users = {u["employee_code"]: u for u in await user_repo.list_users(pool)}
     documents = [
-        {"id": m["maintenance_id"], "text": _maintenance_document(m, devices, users)}
+        {"id": m["maintenance_id"], "text": maintenance_document(m, devices, users)}
         for m in records
     ]
     text_by_id = {doc["id"]: doc["text"] for doc in documents}
 
-    try:
-        async with httpx.AsyncClient(timeout=30) as client:
-            resp = await client.post(
-                f"{settings.ai_url}/rank",
-                json={"query": q, "documents": documents, "top_k": limit},
-            )
-            resp.raise_for_status()
-            ranked = resp.json()
-    except httpx.HTTPError as e:
-        raise HTTPException(503, f"AI search service unavailable: {e}")
+    ranked = await rank(q, documents, limit)
 
     by_id = {m["maintenance_id"]: m for m in records}
     results = [

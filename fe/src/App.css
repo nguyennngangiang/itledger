@@ -174,6 +174,65 @@
   padding: 22px 32px 32px;
 }
 
+/* Table pages: lay the content out as a bounded flex column so the table body
+   flexes to fill the space and its pagination footer (page numbers + page-size
+   selector) is always pinned in view — no whole-page scroll. Dashboard keeps the
+   default `.app-content` vertical scroll. */
+.app-content--flex {
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+.app-content--flex .screen-toolbar,
+.app-content--flex .status-chips,
+.app-content--flex .ai-banner {
+  flex-shrink: 0;
+}
+.app-content--flex .panel {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.app-content--flex .table-wrap {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+}
+/* Make the Ant Table fill `.table-wrap` with a pure flex chain (no percentage
+   heights, so nothing overflows the `overflow:hidden` panel): the body scrolls
+   internally, the header stays pinned, and the pagination is a non-shrinking
+   footer that is always visible. AntD nests:
+     .ant-table-wrapper > .ant-spin(-nested-loading) > .ant-spin-container
+       > .ant-table > .ant-table-container > (.ant-table-header + .ant-table-body)
+   with .ant-pagination as a sibling of .ant-table inside .ant-spin-container.
+   Every level must be a bounded flex column or a middle level (block, content
+   height) breaks the chain and overflows. `max-height: none !important` drops the
+   inline value Ant sets from `scroll.y` so the flex height wins. */
+.app-content--flex .ant-table-wrapper,
+.app-content--flex .ant-table-wrapper > .ant-spin-nested-loading,
+.app-content--flex .ant-table-wrapper > .ant-spin,
+.app-content--flex .ant-spin-container,
+.app-content--flex .ant-table,
+.app-content--flex .ant-table-container {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.app-content--flex .ant-table-header {
+  flex-shrink: 0;
+}
+.app-content--flex .ant-table-body {
+  flex: 1;
+  min-height: 0;
+  max-height: none !important;
+  overflow-y: auto !important;
+}
+.app-content--flex .ant-pagination {
+  flex: 0 0 auto;
+}
+
 @media (max-width: 860px) {
   .topbar {
     gap: 12px;
@@ -1330,6 +1389,12 @@
   flex-direction: column;
   height: min(60vh, 520px);
 }
+.assistant-bar {
+  flex-shrink: 0;
+  display: flex;
+  justify-content: flex-end;
+  padding: 0 2px 6px;
+}
 .assistant-log {
   flex: 1;
   overflow-y: auto;
@@ -1403,6 +1468,40 @@
 .assistant-thinking {
   color: var(--text-muted);
   font-style: italic;
+}
+.assistant-files {
+  flex-shrink: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 8px 2px 0;
+}
+.assistant-file-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 220px;
+  padding: 3px 6px 3px 10px;
+  font-size: 12px;
+  color: var(--accent);
+  background: var(--accent-bg);
+  border: 1px solid var(--accent-border);
+  border-radius: 999px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.assistant-file-x {
+  border: none;
+  background: transparent;
+  color: var(--accent);
+  cursor: pointer;
+  font-size: 15px;
+  line-height: 1;
+  padding: 0 2px;
+}
+.assistant-file-x:hover {
+  color: var(--text);
 }
 .assistant-input {
   display: flex;

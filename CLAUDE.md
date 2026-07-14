@@ -11,6 +11,11 @@ be/                 FastAPI backend (Python 3.12, asyncpg)
   main.py           App entry: lifespan (DB pool), CORS, router wiring, /health
   config.py         Settings from env (DATABASE_URL, CORS_ORIGINS, AI_URL) via be/.env
   db.py             Global asyncpg pool + get_pool() dependency
+  llm.py            Internal OpenAI-compatible client: chat / chat_agent (tools) / rerank
+  LLM_API.md        Reference for the internal LLM/RAG server (endpoints, models, examples)
+  documents.py      Shared row→sentence flatteners (bilingual) for search + assistant
+  search.py         Shared client for the ai `/rank` embedder
+  glossary.py       bilingualize(): append Vietnamese synonyms of English IT terms
   models/           Pydantic schemas (Create / Update / Out / Delete) per resource
   repositories/     ALL SQL lives here (one module per resource) + errors.py
   routers/          Thin HTTP layer — parse, call repo, map errors to status codes
@@ -60,16 +65,32 @@ prefixes (handled in `main.py`); pooling is attention-masked **mean** (not CLS).
 the `Xenova/multilingual-e5-small` HF repo — `onnx/model.onnx` + `tokenizer.json`).
 
 **LLM (generative — Ask AI, explain, rerank):** a separate **internal-network
-OpenAI-compatible** endpoint (not the embedder, not Ollama). The **backend** calls
-it directly via `be/llm.py` (chat completions + `explain`/`rerank`/`rerank_results`
-helpers). Config in `be/config.py` from `be/.env` (gitignored): `LLM_BASE_URL`,
-`LLM_API_KEY` (secret), `LLM_MODEL` — see `be/.env.example`. Powers `POST
-/assistant/ask` (fleet-grounded Q&A), `POST /assistant/explain` (why a result
-matched), and `?rerank=true` on the three `semantic-search` endpoints. **Learning is
-project-local**: marked-correct rows in this project's `search_feedback` table are
-injected as few-shot examples into the rerank/explain prompts — the shared model is
-**never** fine-tuned. If the LLM is unreachable, rerank falls back to semantic order
-and ask/explain return 503 (search still works).
+OpenAI-compatible** endpoint — a Caddy-fronted model server on `:8443` requiring
+`Authorization: Bearer <LLM_API_KEY>`. The **backend** calls it directly via
+`be/llm.py` (chat completions + `chat_agent` agentic tool loop +
+`explain`/`rerank`/`rerank_results` helpers), which already sends the Bearer
+header. Config in `be/config.py` from `be/.env` (gitignored): `LLM_BASE_URL`
+(`…:8443/v1`), `LLM_API_KEY` (secret), `LLM_MODEL` — see `be/.env.example`. The
+server hosts three models (pick via `model`): **`llama3.1:8b`** — text chat, the
+one this app uses (`LLM_MODEL`); `qwen2.5vl:7b` — multimodal (reads images:
+OCR/tables), unused for now; `nomic-embed-text` — embeddings, unused (smart-search
+embeds with the app's **own NPU service** `ai/` e5-small on `:8001` — a *different*
+embedder, don't conflate). It also exposes Ollama-native (`/api/*`) and RAG
+(`/rag/chat` with citations) endpoints, unused by the app. **Full endpoint list +
+request/response examples (text, images, RAG, embeddings, curl/Python/PowerShell)
+live in `be/LLM_API.md`.** Powers `POST /assistant/ask` (**cross-resource, agentic**
+fleet-grounded Q&A), `POST /assistant/explain` (why a result matched), and
+`?rerank=true` on the three `semantic-search` endpoints. **Ask AI is agentic**: the
+prompt carries an exact `FLEET STATS` block (counts are computed in Python, never
+tallied by the LLM) and the model calls backend **tools** (`find_devices`,
+`device_history` — the device+maintenance+handover JOIN — and `semantic_search`
+over any one resource) to fetch detail, so it answers questions that span all
+three resources. It's **multi-turn**: the frontend sends recent chat `history` so
+follow-ups resolve. Falls back to a plain grounded completion if the model can't
+tool-call. **Learning is project-local**: marked-correct rows in this project's
+`search_feedback` table are injected as few-shot examples into the rerank/explain
+prompts — the shared model is **never** fine-tuned. If the LLM is unreachable,
+rerank falls back to semantic order and ask/explain return 503 (search still works).
 
 **Frontend + AI (`npm run dev`):** from `fe/`, `npm install` then `npm run dev`
 (http://localhost:5173) — this runs **Vite + the host AI embedder (:8001)**

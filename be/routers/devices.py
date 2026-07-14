@@ -3,15 +3,12 @@
 Parse the request, call the repository, translate domain errors / missing rows
 to HTTP status codes. No SQL here — that lives in repositories/device.py.
 """
-from datetime import date
-
-import httpx
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
-from ..config import settings
 from ..db import get_pool
-from ..glossary import bilingualize
+from ..documents import device_document
+from ..search import rank
 from .. import llm
 from ..models.device import DeviceCreate, DeviceOut, DeviceUpdate, DeviceDelete
 from ..repositories import device as repo
@@ -41,59 +38,6 @@ class DeviceRanked(DeviceOut):
     score: float
     document: str
     reason: str | None = None
-
-
-def _age_phrase(buy_date) -> str | None:
-    """Describe the device's age so queries like 'old' / 'aging' have signal."""
-    if not buy_date:
-        return None
-    years = (date.today() - buy_date).days / 365.25
-    label = f"purchased {buy_date.year}, about {round(years)} years old"
-    if years >= 5:
-        label += ", aging old hardware"
-    return label
-
-
-def _repair_phrase(repairs: int) -> str:
-    """Describe repair history in words that also match 'broken' / 'malfunction'."""
-    if not repairs:
-        return "never repaired, no malfunctions"
-    label = f"repaired {repairs} times, has broken down and malfunctioned"
-    if repairs >= 3:
-        label += ", frequently breaking, unreliable"
-    return label
-
-
-def _status_phrase(status: str | None) -> str | None:
-    if not status:
-        return None
-    if status == "maintaining":
-        return "status maintaining, currently broken and under repair"
-    return f"status {status}"
-
-
-def _device_document(device: dict, repairs: int, team: str | None) -> str:
-    """Flatten a device into a short natural-language line for embedding.
-
-    This is also returned to the UI as the match's *proof* — the exact text the
-    embedder read — so it stays human-readable on purpose.
-    """
-    ram = device.get("ram")
-    parts = [
-        device.get("name") or device["serial_number"],
-        device.get("type"),
-        device.get("brand"),
-        device.get("cpu"),
-        f"{ram} RAM" if ram else None,
-        device.get("storage"),
-        device.get("os"),
-        device.get("msoffice"),
-        _status_phrase(device.get("status")),
-        f"owned by {team} team" if team else "unassigned, in stock",
-        _repair_phrase(repairs),
-        _age_phrase(device.get("buy_date")),
-    ]
-    return bilingualize(", ".join(p for p in parts if p))
 
 
 @router.post("", response_model=DeviceOut, status_code=201)
@@ -178,7 +122,7 @@ async def semantic_search(
     documents = [
         {
             "id": d["serial_number"],
-            "text": _device_document(
+            "text": device_document(
                 d,
                 counts.get(d["serial_number"], 0),
                 (users.get(d.get("user_id")) or {}).get("team"),
@@ -188,16 +132,7 @@ async def semantic_search(
     ]
     text_by_id = {doc["id"]: doc["text"] for doc in documents}
 
-    try:
-        async with httpx.AsyncClient(timeout=30) as client:
-            resp = await client.post(
-                f"{settings.ai_url}/rank",
-                json={"query": q, "documents": documents, "top_k": limit},
-            )
-            resp.raise_for_status()
-            ranked = resp.json()
-    except httpx.HTTPError as e:
-        raise HTTPException(503, f"AI search service unavailable: {e}")
+    ranked = await rank(q, documents, limit)
 
     by_id = {d["serial_number"]: d for d in devices}
     results = [

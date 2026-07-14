@@ -160,7 +160,11 @@ function App() {
           <p className="page-subtitle">{meta.subtitle}</p>
         </div>
 
-        <main className="app-content">
+        <main
+          className={
+            "app-content" + (page === "dashboard" ? "" : " app-content--flex")
+          }
+        >
           {page === "dashboard" && <Dashboard refreshKey={refresh.device} />}
           {page === "device" && (
             <DeviceMainScreen

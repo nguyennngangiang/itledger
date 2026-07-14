@@ -3,13 +3,12 @@
 Parse the request, call the repository, translate domain errors / missing rows
 to HTTP status codes. No SQL here — that lives in repositories/handover.py.
 """
-import httpx
 from fastapi import APIRouter, Body, Depends, HTTPException
 from pydantic import BaseModel
 
-from ..config import settings
 from ..db import get_pool
-from ..glossary import bilingualize
+from ..documents import handover_document
+from ..search import rank
 from .. import llm
 from ..models.handover import HandoverCreate, HandoverOut, HandoverUpdate
 from ..repositories import handover as repo
@@ -33,35 +32,6 @@ class HandoverRanked(HandoverOut):
     score: float
     document: str
     reason: str | None = None
-
-
-def _who(user: dict, uid: str | None) -> str | None:
-    if not uid:
-        return None
-    name = user.get("name") or uid
-    team = user.get("team")
-    return f"{name} ({team})" if team else name
-
-
-def _handover_document(h: dict, devices: dict, users: dict) -> str:
-    """Flatten a handover into a short natural-language line for embedding — the
-    device, who gave and received it, the reason and date."""
-    device = devices.get(h.get("device_id")) if h.get("device_id") else None
-    date = h.get("handover_date")
-    parts = [
-        f"handover of {(device or {}).get('name') or h['device_id']}"
-        if h.get("device_id")
-        else "handover",
-        f"from {_who(users.get(h.get('from_user_id')) or {}, h.get('from_user_id'))}"
-        if h.get("from_user_id")
-        else None,
-        f"to {_who(users.get(h.get('to_user_id')) or {}, h.get('to_user_id'))}"
-        if h.get("to_user_id")
-        else None,
-        f"reason: {h['reason']}" if h.get("reason") else None,
-        f"on {date}" if date else None,
-    ]
-    return bilingualize(", ".join(p for p in parts if p))
 
 
 @router.post("", response_model=HandoverOut, status_code=201)
@@ -130,21 +100,12 @@ async def semantic_search(
     devices = {d["serial_number"]: d for d in await device_repo.list_devices(pool)}
     users = {u["employee_code"]: u for u in await user_repo.list_users(pool)}
     documents = [
-        {"id": h["handover_id"], "text": _handover_document(h, devices, users)}
+        {"id": h["handover_id"], "text": handover_document(h, devices, users)}
         for h in records
     ]
     text_by_id = {doc["id"]: doc["text"] for doc in documents}
 
-    try:
-        async with httpx.AsyncClient(timeout=30) as client:
-            resp = await client.post(
-                f"{settings.ai_url}/rank",
-                json={"query": q, "documents": documents, "top_k": limit},
-            )
-            resp.raise_for_status()
-            ranked = resp.json()
-    except httpx.HTTPError as e:
-        raise HTTPException(503, f"AI search service unavailable: {e}")
+    ranked = await rank(q, documents, limit)
 
     by_id = {h["handover_id"]: h for h in records}
     results = [
