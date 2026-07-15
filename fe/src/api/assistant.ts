@@ -16,10 +16,13 @@ export function askAssistant(
   history: AssistantTurn[] = [],
   attachments: Attachment[] = [],
 ) {
-  return request<{ answer: string }>('/assistant/ask', {
-    method: 'POST',
-    body: JSON.stringify({ question, history, attachments }),
-  })
+  return request<{ answer: string; tool_calls: string[]; elapsed_ms: number }>(
+    '/assistant/ask',
+    {
+      method: 'POST',
+      body: JSON.stringify({ question, history, attachments }),
+    },
+  )
 }
 
 // One-liner explaining why a record matched a smart-search query (proof card).

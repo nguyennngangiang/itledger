@@ -1,11 +1,12 @@
 # Internal LLM / RAG server — API reference
 
 Reference for the internal-network model server this app talks to. **What IT Ledger
-actually uses today:** only `POST /v1/chat/completions` with `llama3.1:8b`, called from
-`be/llm.py` (Ask AI, explain, rerank — see `chat` / `chat_agent`). The **vision** model
-(`qwen2.5vl:7b`), the **RAG** endpoint (`/rag/chat`) and the server-side embedder
-(`nomic-embed-text`) are available capabilities documented here for **future features** —
-they are not wired into the app.
+actually uses today:** `POST /v1/chat/completions` with `llama3.1:8b` (Ask AI, explain,
+rerank — `be/llm.py` `chat` / `chat_agent`), and `POST /rag/extract` to read files
+attached in Ask AI (`be/extract.py`). The **RAG chat** endpoint (`/rag/chat`) and the
+server-side embedder (`nomic-embed-text`) are available capabilities documented here for
+**future features** — not wired into the app. (`qwen2.5vl:7b` is used indirectly: the
+server falls back to it to OCR scanned PDFs / images inside `/rag/extract`.)
 
 > Note: smart-search embeddings are produced by this app's **own** host NPU service
 > (`ai/`, multilingual-e5-small on `:8001`) — **not** by this server's `nomic-embed-text`.
@@ -53,6 +54,7 @@ App config: `LLM_BASE_URL=http://192.168.3.252:8443/v1` (`be/config.py`).
 | POST | `/api/embed` | Ollama-style embeddings |
 | GET  | `/api/tags` / `/api/ps` | Installed models / models loaded in VRAM |
 | POST | `/rag/chat` | RAG: knowledge retrieval + citations (defaults to `qwen2.5vl:7b`) |
+| POST | `/rag/extract` | Extract text/tables from an uploaded file (OCRs scans/images) |
 | GET  | `/rag/health` | RAG status |
 
 ---
@@ -167,6 +169,37 @@ No `model` field needed (defaults to `qwen2.5vl:7b`). `images` are **raw** base6
 - With images: add `"images": ["<B64>"]` to the message.
 - Result: `{ "answer": "...[1]...", "sources": [ { "n":1, "title":"", "url":"", "origin":"kb|web|target" } ] }`.
 - `GET /rag/health` → `{ ok, model, store: { count } }`.
+
+---
+
+## 3b. File extraction — `POST /rag/extract`
+
+Turns an uploaded file into text (+ tables). **This app uses it** (`be/extract.py`) so
+Ask AI can read attachments — the backend forwards each uploaded file here and folds the
+returned text into the grounded chat. Handles everything server-side:
+
+| File | How | Result |
+|---|---|---|
+| `.xlsx` | openpyxl (exact cell values) | text + tables (numbers stay numeric) |
+| `.docx` | python-docx | paragraphs + tables |
+| PDF (native) | PyMuPDF (text + `find_tables`) | text + tables |
+| PDF (scan) / image | rendered → `qwen2.5vl` vision OCR (auto fallback) | text |
+
+**multipart/form-data** fields:
+- `file` — the upload (required).
+- `instruction` — optional; if set, the model also processes the content and returns an
+  `answer` (e.g. "extract this Excel table as JSON").
+- `ingest=true` + `source_id` — also load into the RAG knowledge base. **This app does NOT
+  send `ingest`** — extraction only, nothing written to the shared KB.
+
+Returns `{ type, method, text, tables: [{ rows, markdown }], answer?, ingested_chunks? }`.
+`rows` preserve data types (numbers stay numbers); `markdown` is for display.
+
+```bash
+curl http://192.168.3.252:8443/rag/extract \
+  -H "Authorization: Bearer <API_KEY>" \
+  -F "file=@report.xlsx"
+```
 
 ---
 

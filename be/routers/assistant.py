@@ -375,19 +375,36 @@ class AskRequest(BaseModel):
 
 class AskResult(BaseModel):
     answer: str
+    tool_calls: list[str] = []
+    elapsed_ms: int = 0
 
 
 # Cap the total extracted-file text folded into the prompt (protect the context).
 MAX_ATTACHMENT_CHARS = int(os.getenv("ASSISTANT_ATTACHMENT_CHARS", "30000"))
 
 
+# Plain-text formats are already text — decode locally instead of calling
+# /rag/extract (which only handles xlsx/docx/pdf/images and 415s on these).
+_TEXT_EXTS = {"csv", "txt", "md", "json", "log", "tsv", "yaml", "yml"}
+
+
+def _is_text(att: Attachment) -> bool:
+    if att.mime.startswith("text/"):
+        return True
+    return att.name.rsplit(".", 1)[-1].lower() in _TEXT_EXTS
+
+
 async def _one_file_block(att: Attachment) -> str:
-    """Extract one attachment via /rag/extract into a labelled text block. A single
-    bad file becomes a note, never a hard failure of the whole question."""
+    """Turn one attachment into a labelled text block: plain-text files are decoded
+    directly, everything else is extracted via /rag/extract (which OCRs images/
+    scanned PDFs). A single bad file becomes a note, never a hard failure."""
     try:
         raw = base64.b64decode(att.data, validate=False)
     except (binascii.Error, ValueError):
         return f"--- File: {att.name} ---\n(không đọc được: dữ liệu base64 lỗi)"
+    if _is_text(att):
+        text = raw.decode("utf-8", errors="replace").strip()
+        return f"--- File: {att.name} ---\n" + (text or "(file rỗng)")
     try:
         result = await extract.extract_file(att.name, att.mime, raw)
     except HTTPException as e:
@@ -435,11 +452,17 @@ async def ask(req: AskRequest, pool=Depends(get_pool)):
         "use device_history for one machine's repairs and/or handovers (it joins all "
         "three tables), find_devices to filter the fleet, and semantic_search for "
         "fuzzy or Vietnamese natural-language lookups. Combine tool results to answer "
-        "questions that span devices, maintenance and handovers. If the user attached "
-        "files, an ATTACHED FILES section holds their extracted content — treat it as "
-        "ground truth and combine it with fleet data (tools) to answer. If the data "
-        "doesn't contain the answer, say so. Be concise; prefer bullet points. Reply in "
-        "the same language as the question (Vietnamese if the user writes Vietnamese)."
+        "questions that span devices, maintenance and handovers.\n"
+        "ATTACHED FILES: if the user's message contains an ATTACHED FILES section, that "
+        "is the content of files THEY uploaded — it is the primary source. Answer "
+        "questions about 'the file / the attachment / this document' DIRECTLY from that "
+        "section; do NOT call semantic_search to look those up (the tools only see the "
+        "fleet database, not the uploaded file). Only call the tools when the user "
+        "explicitly wants to cross-reference the file against the live fleet (e.g. "
+        "'which of these serials are in our inventory').\n"
+        "If the data doesn't contain the answer, say so. Be concise; prefer bullet "
+        "points. Reply in the same language as the question (Vietnamese if the user "
+        "writes Vietnamese)."
     )
 
     messages: list[dict] = []
@@ -454,8 +477,12 @@ async def ask(req: AskRequest, pool=Depends(get_pool)):
         user_content = f"{req.question}\n\n{await _attachments_block(req.attachments)}"
     messages.append({"role": "user", "content": user_content})
 
-    answer = await llm.chat_agent(system, messages, TOOLS, _dispatch(pool))
-    return {"answer": answer}
+    result = await llm.chat_agent(system, messages, TOOLS, _dispatch(pool))
+    return {
+        "answer": result.answer,
+        "tool_calls": result.tool_calls,
+        "elapsed_ms": result.elapsed_ms,
+    }
 
 
 class ExplainRequest(BaseModel):

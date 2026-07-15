@@ -1,14 +1,21 @@
-import { useRef, useState } from "react";
-import { Button, Input } from "antd";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { Button, Drawer, Input } from "antd";
 import { toast } from "react-toastify";
-import { Modal } from "./Modal";
 import { askAssistant } from "../../api/assistant";
+import { listDevices } from "../../api/devices";
+import { countByStatus } from "../../lib/deviceStats";
+import type { Device } from "../../types";
 import { fileToAttachment } from "../../lib/files";
 import { SparklesIcon, UploadIcon } from "../icons";
 import { useSessionState } from "../../lib/useSessionState";
 import { getSessionId } from "../../lib/session";
 
-type Msg = { role: "user" | "ai"; text: string };
+type Msg = {
+  role: "user" | "ai";
+  text: string;
+  toolCalls?: string[];
+  elapsedMs?: number;
+};
 
 const SUGGESTIONS = [
   "Which laptops are oldest and due for replacement?",
@@ -30,8 +37,9 @@ function isAccepted(file: File): boolean {
   return ALLOWED_EXT.includes(ext);
 }
 
-// Grounded Q&A over the fleet, answered by the internal LLM (RAG). Kept mounted so
-// the conversation survives closing/reopening; renders nothing while closed.
+// Grounded Q&A over the fleet, answered by the internal LLM (RAG). A
+// right-docked panel (not a small popover) so it can sit alongside the
+// underlying screen; the conversation persists across closing/reopening.
 export function AssistantModal({
   open,
   onClose,
@@ -49,9 +57,17 @@ export function AssistantModal({
   );
   const [loading, setLoading] = useState(false);
   const [files, setFiles] = useState<File[]>([]);
+  const [devices, setDevices] = useState<Device[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  if (!open) return null;
+  // Live fleet counts for the trust strip ("exact counts — computed, never
+  // guessed") — fetched fresh each time the panel opens.
+  useEffect(() => {
+    if (!open) return;
+    listDevices().then(setDevices).catch(() => {});
+  }, [open]);
+
+  const statusCounts = useMemo(() => countByStatus(devices), [devices]);
 
   const addFiles = (picked: FileList | null) => {
     if (!picked) return;
@@ -92,8 +108,20 @@ export function AssistantModal({
     setLoading(true);
     try {
       const attachments = await Promise.all(pending.map(fileToAttachment));
-      const { answer } = await askAssistant(query || "Đọc và tóm tắt file đính kèm.", history, attachments);
-      setMsgs((m) => [...m, { role: "ai", text: answer }]);
+      const { answer, tool_calls, elapsed_ms } = await askAssistant(
+        query || "Đọc và tóm tắt file đính kèm.",
+        history,
+        attachments,
+      );
+      setMsgs((m) => [
+        ...m,
+        {
+          role: "ai",
+          text: answer,
+          toolCalls: tool_calls ?? [],
+          elapsedMs: elapsed_ms ?? 0,
+        },
+      ]);
     } catch (e) {
       toast.error("Assistant failed: " + e);
       setMsgs((m) => [
@@ -110,8 +138,27 @@ export function AssistantModal({
   };
 
   return (
-    <Modal title="Ask AI — grounded in your fleet" onClose={onClose}>
+    <Drawer
+      title="Ask AI — grounded in your fleet"
+      placement="right"
+      size={460}
+      open={open}
+      onClose={onClose}
+      className="assistant-drawer"
+      destroyOnHidden={false}
+    >
       <div className="assistant">
+        <div className="assistant-stats-strip">
+          <span className="assistant-stat-pill">{devices.length} devices</span>
+          <span className="assistant-stat-pill">
+            {statusCounts.maintaining} maintaining
+          </span>
+          <span className="assistant-stat-pill">{statusCounts.on_del} on-del</span>
+          <span className="assistant-stat-caption">
+            exact counts — computed, never guessed
+          </span>
+        </div>
+
         {msgs.length > 0 && (
           <div className="assistant-bar">
             <Button size="small" onClick={() => setMsgs([])} disabled={loading}>
@@ -144,6 +191,19 @@ export function AssistantModal({
           {msgs.map((m, i) => (
             <div key={i} className={`assistant-msg ${m.role}`}>
               <div className="assistant-bubble">{m.text}</div>
+              {m.role === "ai" && !!m.toolCalls?.length && (
+                <div className="assistant-trace">
+                  {m.toolCalls.map((t, j) => (
+                    <span className="assistant-trace-chip" key={j}>
+                      {t}
+                    </span>
+                  ))}
+                  <span className="assistant-trace-meta">
+                    {m.toolCalls.length} tool call{m.toolCalls.length === 1 ? "" : "s"}
+                    {m.elapsedMs ? ` · ${(m.elapsedMs / 1000).toFixed(1)}s` : ""}
+                  </span>
+                </div>
+              )}
             </div>
           ))}
           {loading && (
@@ -205,6 +265,6 @@ export function AssistantModal({
           </Button>
         </div>
       </div>
-    </Modal>
+    </Drawer>
   );
 }

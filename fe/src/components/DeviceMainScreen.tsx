@@ -369,7 +369,9 @@ export const DeviceMainScreen = ({
           <span className="ai-banner-text">
             <SparklesIcon size={16} />
             Smart results for <b>“{aiQuery}”</b> — {aiResults!.length} matches,
-            {rerank ? " re-ranked by the LLM" : " ranked by meaning"}
+            {rerank
+              ? " re-ranked by the LLM · it learns from your marks"
+              : " ranked by meaning"}
           </span>
           <Button size="small" onClick={clearAi}>
             Clear

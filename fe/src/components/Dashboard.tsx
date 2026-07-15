@@ -13,9 +13,19 @@ import {
 import ChartDataLabels from "chartjs-plugin-datalabels";
 import { Pie, Bar } from "react-chartjs-2";
 import { listDevices } from "../api/devices";
-import type { Device, DeviceStatus } from "../types";
+import { listMaintenance } from "../api/maintenance";
+import { listHandovers } from "../api/handovers";
+import { listUsers } from "../api/users";
+import type { Device, Maintenance, Handover } from "../types";
 import { DEVICE_STATUS_META, DEVICE_STATUS_ORDER } from "../types";
 import { DeviceIcon } from "./icons";
+import { formatDate, resolveOwner, toUserMap, type UserMap } from "../lib/format";
+import { countByStatus } from "../lib/deviceStats";
+import { ActivityFeed, type ActivityItem } from "./ActivityFeed";
+import { AgingWatchlist, type AgingEntry } from "./AgingWatchlist";
+import { RepairSpendPanel } from "./RepairSpendPanel";
+
+const MS_PER_YEAR = 365.25 * 24 * 60 * 60 * 1000;
 
 ChartJS.register(
   ArcElement,
@@ -78,11 +88,27 @@ const pieOptions = {
 
 export const Dashboard = ({ refreshKey = 0 }: { refreshKey?: number }) => {
   const [devices, setDevices] = useState<Device[]>([]);
+  const [maintenance, setMaintenance] = useState<Maintenance[]>([]);
+  const [handovers, setHandovers] = useState<Handover[]>([]);
+  const [users, setUsers] = useState<UserMap>({});
+  // Snapshot of "now" taken when data last loaded — used for device-age math,
+  // kept out of render (Date.now() there would re-run on every re-render).
+  const [asOf, setAsOf] = useState(0);
 
   useEffect(() => {
     (async () => {
       try {
-        setDevices(await listDevices());
+        const [ds, ms, hs, us] = await Promise.all([
+          listDevices(),
+          listMaintenance(),
+          listHandovers(),
+          listUsers(),
+        ]);
+        setDevices(ds);
+        setMaintenance(ms);
+        setHandovers(hs);
+        setUsers(toUserMap(us));
+        setAsOf(Date.now());
       } catch (err) {
         console.error(err);
       }
@@ -92,28 +118,107 @@ export const Dashboard = ({ refreshKey = 0 }: { refreshKey?: number }) => {
   // Sparkly staggered entrance once devices land.
   useEffect(() => {
     if (devices.length) {
-      animateEntrance(".dash-charts .panel", 90);
       animateEntrance(".dash-stats .stat-card", 70);
+      animateEntrance(".dash-charts .panel", 90);
+      animateEntrance(".dash-story-row .panel", 100);
     }
   }, [devices.length]);
 
-  const statusCounts = useMemo(() => {
-    const c: Record<DeviceStatus, number> = {
-      active: 0,
-      in_stock: 0,
-      maintaining: 0,
-      on_del: 0,
-    };
-    for (const d of devices) {
-      const s = (d.status ?? "in_stock") as DeviceStatus;
-      if (s in c) c[s] += 1;
-    }
-    return c;
-  }, [devices]);
+  const statusCounts = useMemo(() => countByStatus(devices), [devices]);
 
   const byBrand = useMemo(() => countBy(devices, "brand"), [devices]);
   const byCpu = useMemo(() => countBy(devices, "cpu"), [devices]);
   const byOs = useMemo(() => countBy(devices, "os"), [devices]);
+
+  const devicesById = useMemo(
+    () => Object.fromEntries(devices.map((d) => [d.serial_number, d])),
+    [devices],
+  );
+
+  // Fleet pulse: merge real dated events (buy_date / maintenance_date /
+  // handover_date) — no synthetic activity log, the schema has no timestamps.
+  const activityItems = useMemo<ActivityItem[]>(() => {
+    const items: ActivityItem[] = [];
+    for (const d of devices) {
+      if (!d.buy_date) continue;
+      items.push({
+        id: `reg-${d.serial_number}`,
+        date: d.buy_date,
+        kind: "registered",
+        text: (
+          <>
+            <b>{d.name ?? d.serial_number}</b> added to the ledger
+          </>
+        ),
+      });
+    }
+    for (const m of maintenance) {
+      if (!m.maintenance_date) continue;
+      const device = m.device_id ? devicesById[m.device_id] : undefined;
+      items.push({
+        id: `mnt-${m.maintenance_id}`,
+        date: m.maintenance_date,
+        kind: "repair",
+        text: (
+          <>
+            <b>{device?.name ?? m.device_id ?? "Unknown device"}</b> serviced
+            {m.part ? <> — {m.part}</> : null}
+          </>
+        ),
+      });
+    }
+    for (const h of handovers) {
+      if (!h.handover_date) continue;
+      const device = h.device_id ? devicesById[h.device_id] : undefined;
+      const to = resolveOwner(h.to_user_id, users);
+      items.push({
+        id: `hnd-${h.handover_id}`,
+        date: h.handover_date,
+        kind: "handover",
+        text: (
+          <>
+            <b>{device?.name ?? h.device_id ?? "Unknown device"}</b> handed to{" "}
+            {to.name} <span className="text-faint">({to.team})</span>
+            {h.reason ? <> — {h.reason}</> : null}
+          </>
+        ),
+      });
+    }
+    return items.sort((a, b) => b.date.localeCompare(a.date)).slice(0, 8);
+  }, [devices, maintenance, handovers, devicesById, users]);
+
+  const mostRecentActivityDate = useMemo(() => {
+    const dates = [
+      ...devices.map((d) => d.buy_date),
+      ...maintenance.map((m) => m.maintenance_date),
+      ...handovers.map((h) => h.handover_date),
+    ].filter((d): d is string => !!d);
+    return dates.length ? dates.reduce((a, b) => (a > b ? a : b)) : null;
+  }, [devices, maintenance, handovers]);
+
+  const AGING_THRESHOLD_YEARS = 5;
+  const { agingEntries, totalAging } = useMemo(() => {
+    // asOf is 0 until the first load lands; devices is empty then too, so
+    // the age filter below simply yields nothing rather than needing `now`.
+    const now = asOf;
+    const aged = devices
+      .filter((d) => d.buy_date)
+      .map((d) => ({
+        device: d,
+        years: (now - new Date(d.buy_date as string).getTime()) / MS_PER_YEAR,
+      }))
+      .filter((e) => e.years >= AGING_THRESHOLD_YEARS)
+      .sort((a, b) => b.years - a.years);
+    const entries: AgingEntry[] = aged.slice(0, 5).map((e) => {
+      const o = resolveOwner(e.device.user_id, users);
+      return {
+        device: e.device,
+        years: e.years,
+        ownerLabel: `${o.name} · ${o.team}`,
+      };
+    });
+    return { agingEntries: entries, totalAging: aged.length };
+  }, [devices, users, asOf]);
 
   const pieData = (entries: { label: string; value: number }[]) => ({
     labels: entries.map((e) => e.label),
@@ -201,7 +306,33 @@ export const Dashboard = ({ refreshKey = 0 }: { refreshKey?: number }) => {
 
   return (
     <>
-      {/* Charts first */}
+      <div className="dash-header">
+        <span className="dash-live-pill">
+          <span className="dash-live-dot" />
+          Ledger current — last entry: {formatDate(mostRecentActivityDate)}
+        </span>
+      </div>
+
+      {/* KPIs first */}
+      <div className="dash-stats">
+        {statCards.map((c) => (
+          <div className="stat-card" key={c.label}>
+            <div className="stat-card-top">
+              <span className={`stat-icon ${c.tone}`}>
+                {c.icon ? <DeviceIcon size={22} /> : <span className="stat-dot" />}
+              </span>
+            </div>
+            <div>
+              <div className="stat-value">
+                <CountUp value={c.value} />
+              </div>
+              <div className="stat-label">{c.label}</div>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {/* Charts kept */}
       <div className="dash-charts">
         {charts.map((c) => (
           <div className="panel" key={c.title}>
@@ -240,23 +371,11 @@ export const Dashboard = ({ refreshKey = 0 }: { refreshKey?: number }) => {
         </div>
       </div>
 
-      {/* Totals below */}
-      <div className="dash-stats">
-        {statCards.map((c) => (
-          <div className="stat-card" key={c.label}>
-            <div className="stat-card-top">
-              <span className={`stat-icon ${c.tone}`}>
-                {c.icon ? <DeviceIcon size={22} /> : <span className="stat-dot" />}
-              </span>
-            </div>
-            <div>
-              <div className="stat-value">
-                <CountUp value={c.value} />
-              </div>
-              <div className="stat-label">{c.label}</div>
-            </div>
-          </div>
-        ))}
+      {/* New "fleet story" row */}
+      <div className="dash-story-row">
+        <ActivityFeed items={activityItems} />
+        <AgingWatchlist entries={agingEntries} totalAging={totalAging} />
+        <RepairSpendPanel maintenance={maintenance} />
       </div>
     </>
   );

@@ -15,6 +15,7 @@ be/                 FastAPI backend (Python 3.12, asyncpg)
   LLM_API.md        Reference for the internal LLM/RAG server (endpoints, models, examples)
   documents.py      Shared row→sentence flatteners (bilingual) for search + assistant
   search.py         Shared client for the ai `/rank` embedder
+  extract.py        Client for the LLM server's /rag/extract (Ask AI file uploads)
   glossary.py       bilingualize(): append Vietnamese synonyms of English IT terms
   models/           Pydantic schemas (Create / Update / Out / Delete) per resource
   repositories/     ALL SQL lives here (one module per resource) + errors.py
@@ -86,7 +87,12 @@ tallied by the LLM) and the model calls backend **tools** (`find_devices`,
 `device_history` — the device+maintenance+handover JOIN — and `semantic_search`
 over any one resource) to fetch detail, so it answers questions that span all
 three resources. It's **multi-turn**: the frontend sends recent chat `history` so
-follow-ups resolve. Falls back to a plain grounded completion if the model can't
+follow-ups resolve. It also **reads attached files**: the Ask AI chat accepts
+uploads (image / PDF / DOCX / XLSX / CSV / TXT); the backend (`be/extract.py`)
+forwards each to the LLM server's `POST /rag/extract` (parses office/PDF docs,
+OCRs scanned PDFs & images via the vision model), and folds the extracted
+text + tables into the prompt as an `ATTACHED FILES` block so the answer combines
+files with fleet data. Falls back to a plain grounded completion if the model can't
 tool-call. **Learning is project-local**: marked-correct rows in this project's
 `search_feedback` table are injected as few-shot examples into the rerank/explain
 prompts — the shared model is **never** fine-tuned. If the LLM is unreachable,

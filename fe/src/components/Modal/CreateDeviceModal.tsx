@@ -178,49 +178,68 @@ export function CreateDeviceModal({
   return (
     <Modal title={isEdit ? "Edit Device" : "Create Device"} onClose={onClose}>
       <form className="modal-form" onSubmit={handleSubmit}>
-        <div className="form-grid">
-          <label className="form-field">
-            <span>
-              Serial Number<span className="req">*</span>
-            </span>
-            <Input
-              value={form.serial_number}
-              required
-              disabled={isEdit}
-              placeholder="SN123456789"
-              onChange={(e) => set("serial_number", e.target.value)}
-            />
-          </label>
+        <div className="form-section">
+          <div className="form-section-label">Identity</div>
+          <div className="form-grid">
+            <label className="form-field">
+              <span>
+                Serial Number<span className="req">*</span>
+              </span>
+              <Input
+                value={form.serial_number}
+                required
+                disabled={isEdit}
+                placeholder="SN123456789"
+                onChange={(e) => set("serial_number", e.target.value)}
+              />
+            </label>
 
-          <label className="form-field">
-            <span>Device Name</span>
-            <Input
-              value={form.name}
-              placeholder="Dell Latitude 5420"
-              onChange={(e) => set("name", e.target.value)}
-            />
-          </label>
+            <label className="form-field">
+              <span>Device Name</span>
+              <Input
+                value={form.name}
+                placeholder="Dell Latitude 5420"
+                onChange={(e) => set("name", e.target.value)}
+              />
+            </label>
+          </div>
+        </div>
 
-          <label className="form-field">
-            <span>Owner</span>
-            <Select
-              showSearch
-              optionFilterProp="label"
-              value={form.user_id}
-              onChange={setOwner}
-              options={userOptions}
-            />
-          </label>
+        <div className="form-section">
+          <div className="form-section-label">Assignment</div>
+          <div className="form-grid">
+            <label className="form-field">
+              <span>Owner</span>
+              <Select
+                showSearch
+                optionFilterProp="label"
+                value={form.user_id}
+                onChange={setOwner}
+                options={userOptions}
+              />
+            </label>
 
-          <label className="form-field">
-            <span>Status</span>
-            <Select
-              value={form.status}
-              onChange={(v) => set("status", v)}
-              options={statusOptions}
-            />
-          </label>
+            <label className="form-field">
+              <span>Status</span>
+              <Select
+                value={form.status}
+                onChange={(v) => set("status", v)}
+                options={statusOptions}
+              />
+            </label>
+          </div>
+          {(form.status === "active" || form.status === "in_stock") && (
+            <p className="info-callout">
+              Status follows the owner — assigning a person flips it to{" "}
+              <b>Active</b>; clearing the owner (IT Store) returns it to{" "}
+              <b>In stock</b>.
+            </p>
+          )}
+        </div>
 
+        <div className="form-section">
+          <div className="form-section-label">Specifications</div>
+          <div className="form-grid">
           {SPEC_FIELDS.map((f) => {
             let control: React.ReactNode;
             if (f.key === "buy_date") {
@@ -269,6 +288,7 @@ export function CreateDeviceModal({
               </label>
             );
           })}
+          </div>
         </div>
 
         {error && <p className="form-error">{error}</p>}

@@ -4,6 +4,7 @@ import type { TableColumnsType } from "antd";
 import { toast } from "react-toastify";
 import {
   pageHandovers,
+  listHandovers,
   deleteHandover,
   deleteHandoversBatch,
   restoreHandover,
@@ -21,6 +22,7 @@ import { useSmartProof } from "../lib/relevance";
 import { formatDate, resolveOwner, toUserMap } from "../lib/format";
 import { usePagedList } from "../lib/usePagedList";
 import { TABLE_SCROLL } from "../lib/table";
+import { DeviceJourneyPanel } from "./DeviceJourneyPanel";
 
 export const HandoverScreen = ({
   refreshKey = 0,
@@ -42,6 +44,8 @@ export const HandoverScreen = ({
   const [aiResults, setAiResults] = useState<HandoverRanked[] | null>(null);
   const [aiQuery, setAiQuery] = useState("");
   const [aiLoading, setAiLoading] = useState(false);
+  const [selected, setSelected] = useState<Handover | null>(null);
+  const [deviceHandovers, setDeviceHandovers] = useState<Handover[]>([]);
 
   const showingAi = aiResults !== null;
 
@@ -85,6 +89,26 @@ export const HandoverScreen = ({
   });
 
   useEffect(() => setSelectedKeys([]), [list.trashed]);
+
+  // Selecting a handover loads that device's full transfer history for the
+  // journey panel (not just the current page of results).
+  useEffect(() => {
+    if (!selected?.device_id) {
+      setDeviceHandovers(selected ? [selected] : []);
+      return;
+    }
+    let cancelled = false;
+    listHandovers(selected.device_id)
+      .then((rows) => {
+        if (!cancelled) setDeviceHandovers(rows);
+      })
+      .catch(() => {
+        if (!cancelled) setDeviceHandovers([selected]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [selected]);
 
   const handleBulkDelete = async () => {
     setBulkConfirm(false);
@@ -193,7 +217,7 @@ export const HandoverScreen = ({
       width: 140,
       render: (_, h) =>
         list.trashed ? (
-          <div className="flex items-center gap-1">
+          <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
             <Button size="small" onClick={() => handleRestore(h.handover_id)}>
               Restore
             </Button>
@@ -205,7 +229,7 @@ export const HandoverScreen = ({
             />
           </div>
         ) : (
-          <div className="flex items-center gap-1">
+          <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
             <Button
               type="text"
               icon={<EditIcon size={18} />}
@@ -284,7 +308,9 @@ export const HandoverScreen = ({
           <span className="ai-banner-text">
             <SparklesIcon size={16} />
             Smart results for <b>“{aiQuery}”</b> — {aiResults!.length} matches,
-            {rerank ? " re-ranked by the LLM" : " ranked by meaning"}
+            {rerank
+              ? " re-ranked by the LLM · it learns from your marks"
+              : " ranked by meaning"}
           </span>
           <Button size="small" onClick={clearAi}>
             Clear
@@ -292,51 +318,76 @@ export const HandoverScreen = ({
         </div>
       )}
 
-      <div className="panel">
-        <div className="panel-head">
-          <span className="panel-title">
-            {showingAi ? "Smart results" : list.trashed ? "Trash" : "Handover history"}
-          </span>
-          {selectedKeys.length > 0 ? (
-            <BulkDeleteBar
-              count={selectedKeys.length}
-              trashed={list.trashed}
-              onDelete={() => setBulkConfirm(true)}
-              onClear={() => setSelectedKeys([])}
-            />
-          ) : (
-            <span className="panel-count">
-              {showingAi ? `${aiResults!.length} matches` : `${list.total} total`}
+      <div className="split-view">
+        <div className="panel table-panel">
+          <div className="panel-head">
+            <span className="panel-title">
+              {showingAi ? "Smart results" : list.trashed ? "Trash" : "Handover history"}
             </span>
-          )}
+            {selectedKeys.length > 0 ? (
+              <BulkDeleteBar
+                count={selectedKeys.length}
+                trashed={list.trashed}
+                onDelete={() => setBulkConfirm(true)}
+                onClear={() => setSelectedKeys([])}
+              />
+            ) : (
+              <span className="panel-count">
+                {showingAi ? `${aiResults!.length} matches` : `${list.total} total`}
+              </span>
+            )}
+          </div>
+          <div className="table-wrap">
+            {showingAi ? (
+              <Table<Handover>
+                rowKey="handover_id"
+                columns={[proofColumn, ...columns]}
+                dataSource={aiResults!}
+                loading={aiLoading}
+                pagination={false}
+                scroll={TABLE_SCROLL}
+                rowSelection={{
+                  selectedRowKeys: selectedKeys,
+                  onChange: (keys) => setSelectedKeys(keys as string[]),
+                }}
+                onRow={(h) => ({
+                  onClick: () => setSelected(h),
+                  className: selected?.handover_id === h.handover_id ? "row-selected" : "",
+                })}
+              />
+            ) : (
+              <Table<Handover>
+                rowKey="handover_id"
+                columns={columns}
+                scroll={TABLE_SCROLL}
+                rowSelection={{
+                  selectedRowKeys: selectedKeys,
+                  onChange: (keys) => setSelectedKeys(keys as string[]),
+                }}
+                onRow={(h) => ({
+                  onClick: () => setSelected(h),
+                  className: selected?.handover_id === h.handover_id ? "row-selected" : "",
+                })}
+                {...list.tableProps}
+              />
+            )}
+          </div>
         </div>
-        <div className="table-wrap">
-          {showingAi ? (
-            <Table<Handover>
-              rowKey="handover_id"
-              columns={[proofColumn, ...columns]}
-              dataSource={aiResults!}
-              loading={aiLoading}
-              pagination={false}
-              scroll={TABLE_SCROLL}
-              rowSelection={{
-                selectedRowKeys: selectedKeys,
-                onChange: (keys) => setSelectedKeys(keys as string[]),
-              }}
-            />
-          ) : (
-            <Table<Handover>
-              rowKey="handover_id"
-              columns={columns}
-              scroll={TABLE_SCROLL}
-              rowSelection={{
-                selectedRowKeys: selectedKeys,
-                onChange: (keys) => setSelectedKeys(keys as string[]),
-              }}
-              {...list.tableProps}
-            />
-          )}
-        </div>
+
+        {selected ? (
+          <DeviceJourneyPanel
+            device={selected.device_id ? devices[selected.device_id] : undefined}
+            handovers={deviceHandovers}
+            users={users}
+            onClose={() => setSelected(null)}
+          />
+        ) : (
+          <div className="panel detail-panel">
+            <div className="detail-panel-empty">
+              Select a handover to trace its device's full chain of custody.
+            </div>
+          </div>
+        )}
       </div>
 
       {editTarget && (

@@ -10,6 +10,8 @@ few-shot examples in the rerank/explain prompts — see `rerank(..., examples=..
 Nothing here writes back to or trains the shared model.
 """
 import json
+import time
+from typing import NamedTuple
 
 import httpx
 from fastapi import HTTPException
@@ -59,6 +61,12 @@ async def chat(system: str, user: str, *, temperature: float = 0.3, timeout: flo
         raise HTTPException(503, f"LLM unavailable: {e}")
 
 
+class AgentResult(NamedTuple):
+    answer: str
+    tool_calls: list[str]
+    elapsed_ms: int
+
+
 async def chat_agent(
     system: str,
     messages: list[dict],
@@ -68,22 +76,28 @@ async def chat_agent(
     max_steps: int = 6,
     temperature: float = 0.2,
     timeout: float = 240,
-) -> str:
+) -> AgentResult:
     """Agentic chat. The model may call `tools` — each executed via
     `await dispatch(name, args)` which returns a text result — across up to
-    `max_steps` rounds, then returns its final answer.
+    `max_steps` rounds, then returns its final answer plus which tools were
+    called (in order) and the total elapsed time, for a UI trace.
 
     `messages` is the prior conversation (already role-mapped, no system message).
     Grounding baseline lives in `system`, so this degrades gracefully: if the
     server ignores tool-calling (returns content on the first turn) we still get a
     grounded answer, and if it rejects the `tools` param outright (HTTP 400) we
     retry toolless. Raises HTTPException(503) only when the LLM is unreachable."""
+    start = time.monotonic()
+    called: list[str] = []
     convo: list[dict] = [{"role": "system", "content": system}, *messages]
     headers = {"Content-Type": "application/json"}
     if settings.llm_api_key:
         headers["Authorization"] = f"Bearer {settings.llm_api_key}"
     url = f"{settings.llm_base_url}/chat/completions"
     use_tools = True
+
+    def _result(answer: str) -> AgentResult:
+        return AgentResult(answer, called, int((time.monotonic() - start) * 1000))
 
     async with httpx.AsyncClient(timeout=timeout) as client:
         for _ in range(max_steps):
@@ -106,13 +120,14 @@ async def chat_agent(
             except httpx.HTTPError as e:  # noqa: BLE001
                 raise HTTPException(503, f"LLM unavailable: {e}")
 
-            tool_calls = (msg.get("tool_calls") or []) if use_tools else []
-            if not tool_calls:
-                return (msg.get("content") or "").strip()
+            requested_calls = (msg.get("tool_calls") or []) if use_tools else []
+            if not requested_calls:
+                return _result((msg.get("content") or "").strip())
 
             convo.append(msg)  # the assistant turn that requested the tool calls
-            for call in tool_calls:
+            for call in requested_calls:
                 fn = call.get("function", {})
+                called.append(fn.get("name", ""))
                 try:
                     args = json.loads(fn.get("arguments") or "{}")
                 except json.JSONDecodeError:
@@ -146,7 +161,7 @@ async def chat_agent(
                 headers=headers,
             )
             resp.raise_for_status()
-            return (resp.json()["choices"][0]["message"].get("content") or "").strip()
+            return _result((resp.json()["choices"][0]["message"].get("content") or "").strip())
         except httpx.HTTPError as e:  # noqa: BLE001
             raise HTTPException(503, f"LLM unavailable: {e}")
 

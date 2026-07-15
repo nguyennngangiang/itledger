@@ -4,6 +4,7 @@ import type { TableColumnsType } from "antd";
 import { toast } from "react-toastify";
 import {
   pageMaintenance,
+  listMaintenance,
   deleteMaintenance,
   deleteMaintenanceBatch,
   restoreMaintenance,
@@ -21,6 +22,7 @@ import { useSmartProof } from "../lib/relevance";
 import { formatDate, resolveOwner, toUserMap } from "../lib/format";
 import { usePagedList } from "../lib/usePagedList";
 import { TABLE_SCROLL } from "../lib/table";
+import { RepairStoryPanel } from "./RepairStoryPanel";
 
 export const MaintenanceScreen = ({
   refreshKey = 0,
@@ -42,6 +44,8 @@ export const MaintenanceScreen = ({
   const [aiResults, setAiResults] = useState<MaintenanceRanked[] | null>(null);
   const [aiQuery, setAiQuery] = useState("");
   const [aiLoading, setAiLoading] = useState(false);
+  const [selected, setSelected] = useState<Maintenance | null>(null);
+  const [deviceHistory, setDeviceHistory] = useState<Maintenance[]>([]);
 
   const showingAi = aiResults !== null;
 
@@ -85,6 +89,25 @@ export const MaintenanceScreen = ({
   });
 
   useEffect(() => setSelectedKeys([]), [list.trashed]);
+
+  // Selecting a repair loads that device's full history for the story panel.
+  useEffect(() => {
+    if (!selected?.device_id) {
+      setDeviceHistory(selected ? [selected] : []);
+      return;
+    }
+    let cancelled = false;
+    listMaintenance(selected.device_id)
+      .then((rows) => {
+        if (!cancelled) setDeviceHistory(rows);
+      })
+      .catch(() => {
+        if (!cancelled) setDeviceHistory([selected]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [selected]);
 
   const handleBulkDelete = async () => {
     setBulkConfirm(false);
@@ -213,7 +236,7 @@ export const MaintenanceScreen = ({
       width: 160,
       render: (_, m) =>
         list.trashed ? (
-          <div className="flex items-center gap-1">
+          <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
             <Button size="small" onClick={() => handleRestore(m.maintenance_id)}>
               Restore
             </Button>
@@ -225,7 +248,7 @@ export const MaintenanceScreen = ({
             />
           </div>
         ) : (
-          <div className="flex items-center gap-1">
+          <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
             <Popover
               title="Repair details"
               content={detailBubble(m)}
@@ -314,7 +337,9 @@ export const MaintenanceScreen = ({
           <span className="ai-banner-text">
             <SparklesIcon size={16} />
             Smart results for <b>“{aiQuery}”</b> — {aiResults!.length} matches,
-            {rerank ? " re-ranked by the LLM" : " ranked by meaning"}
+            {rerank
+              ? " re-ranked by the LLM · it learns from your marks"
+              : " ranked by meaning"}
           </span>
           <Button size="small" onClick={clearAi}>
             Clear
@@ -322,55 +347,85 @@ export const MaintenanceScreen = ({
         </div>
       )}
 
-      <div className="panel">
-        <div className="panel-head">
-          <span className="panel-title">
-            {showingAi
-              ? "Smart results"
-              : list.trashed
-              ? "Trash"
-              : "Maintenance records"}
-          </span>
-          {selectedKeys.length > 0 ? (
-            <BulkDeleteBar
-              count={selectedKeys.length}
-              trashed={list.trashed}
-              onDelete={() => setBulkConfirm(true)}
-              onClear={() => setSelectedKeys([])}
-            />
-          ) : (
-            <span className="panel-count">
-              {showingAi ? `${aiResults!.length} matches` : `${list.total} total`}
+      <div className="split-view">
+        <div className="panel table-panel">
+          <div className="panel-head">
+            <span className="panel-title">
+              {showingAi
+                ? "Smart results"
+                : list.trashed
+                ? "Trash"
+                : "Maintenance records"}
             </span>
-          )}
+            {selectedKeys.length > 0 ? (
+              <BulkDeleteBar
+                count={selectedKeys.length}
+                trashed={list.trashed}
+                onDelete={() => setBulkConfirm(true)}
+                onClear={() => setSelectedKeys([])}
+              />
+            ) : (
+              <span className="panel-count">
+                {showingAi ? `${aiResults!.length} matches` : `${list.total} total`}
+              </span>
+            )}
+          </div>
+          <div className="table-wrap">
+            {showingAi ? (
+              <Table<Maintenance>
+                rowKey="maintenance_id"
+                columns={[proofColumn, ...columns]}
+                dataSource={aiResults!}
+                loading={aiLoading}
+                pagination={false}
+                scroll={TABLE_SCROLL}
+                rowSelection={{
+                  selectedRowKeys: selectedKeys,
+                  onChange: (keys) => setSelectedKeys(keys as string[]),
+                }}
+                onRow={(m) => ({
+                  onClick: () => setSelected(m),
+                  className: selected?.maintenance_id === m.maintenance_id ? "row-selected" : "",
+                })}
+              />
+            ) : (
+              <Table<Maintenance>
+                rowKey="maintenance_id"
+                columns={columns}
+                scroll={TABLE_SCROLL}
+                rowSelection={{
+                  selectedRowKeys: selectedKeys,
+                  onChange: (keys) => setSelectedKeys(keys as string[]),
+                }}
+                onRow={(m) => ({
+                  onClick: () => setSelected(m),
+                  className: selected?.maintenance_id === m.maintenance_id ? "row-selected" : "",
+                })}
+                {...list.tableProps}
+              />
+            )}
+          </div>
         </div>
-        <div className="table-wrap">
-          {showingAi ? (
-            <Table<Maintenance>
-              rowKey="maintenance_id"
-              columns={[proofColumn, ...columns]}
-              dataSource={aiResults!}
-              loading={aiLoading}
-              pagination={false}
-              scroll={TABLE_SCROLL}
-              rowSelection={{
-                selectedRowKeys: selectedKeys,
-                onChange: (keys) => setSelectedKeys(keys as string[]),
-              }}
-            />
-          ) : (
-            <Table<Maintenance>
-              rowKey="maintenance_id"
-              columns={columns}
-              scroll={TABLE_SCROLL}
-              rowSelection={{
-                selectedRowKeys: selectedKeys,
-                onChange: (keys) => setSelectedKeys(keys as string[]),
-              }}
-              {...list.tableProps}
-            />
-          )}
-        </div>
+
+        {selected ? (
+          <RepairStoryPanel
+            record={selected}
+            device={selected.device_id ? devices[selected.device_id] : undefined}
+            owner={resolveOwner(
+              selected.device_id ? devices[selected.device_id]?.user_id ?? null : null,
+              users,
+            )}
+            history={deviceHistory}
+            onClose={() => setSelected(null)}
+          />
+        ) : (
+          <div className="panel detail-panel">
+            <div className="detail-panel-empty">
+              Select a repair to read its story — problem, fix, result, and this
+              device's other repairs.
+            </div>
+          </div>
+        )}
       </div>
 
       {editTarget && (
