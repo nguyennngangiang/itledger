@@ -1,0 +1,7 @@
+# Host (non-Docker) deps for the NPU/GPU-accelerated embedding service.
+# Needs Python 3.12 (OpenVINO has no 3.14 wheels yet).
+fastapi>=0.115
+uvicorn[standard]>=0.32
+openvino==2025.1.0
+tokenizers>=0.15
+numpy>=1.26

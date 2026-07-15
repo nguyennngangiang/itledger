@@ -14,10 +14,43 @@ export type Device = {
   buy_date: string | null // ISO date string, e.g. "2026-06-11"
   name: string | null
   user_id: string | null
+  status: DeviceStatus | null
 }
+
+// Device lifecycle status (stored on the backend `devices.status` column).
+export type DeviceStatus = "active" | "in_stock" | "maintaining" | "on_del"
+
+// Single ghost account (IT team) that owns every ownerless / in-stock device.
+export const GHOST_USER_CODE = "IT-STORE"
+
+// Display metadata for each status: label + indicator-light color + pill class.
+export const DEVICE_STATUS_META: Record<
+  DeviceStatus,
+  { label: string; color: string; pill: string }
+> = {
+  active: { label: "Active", color: "#34d399", pill: "pill-success" },
+  in_stock: { label: "In stock", color: "#94a3b8", pill: "pill-neutral" },
+  maintaining: { label: "Maintaining", color: "#fbbf24", pill: "pill-warning" },
+  on_del: { label: "On-del", color: "#f87171", pill: "pill-danger" },
+}
+
+export const DEVICE_STATUS_ORDER: DeviceStatus[] = [
+  "active",
+  "in_stock",
+  "maintaining",
+  "on_del",
+]
 
 // Fields accepted when creating a device (serial_number required, rest optional).
 export type DeviceCreate = Pick<Device, 'serial_number'> & Partial<Omit<Device, 'serial_number'>>
+
+// A device plus its semantic-search relevance score (0–1) and `document` — the
+// exact sentence the embedder ranked it on.
+export type DeviceRanked = Device & {
+  score: number
+  document: string
+  reason?: string | null
+}
 
 export type User = {
   employee_code: string
@@ -51,6 +84,13 @@ export type Maintenance = {
 export type MaintenanceCreate = Pick<Maintenance, 'maintenance_id'> &
   Partial<Omit<Maintenance, 'maintenance_id'>>
 
+// A maintenance record plus its semantic-search relevance score (0–1).
+export type MaintenanceRanked = Maintenance & {
+  score: number
+  document: string
+  reason?: string | null
+}
+
 export type Handover = {
   handover_id: string
   handover_date: string | null
@@ -62,6 +102,13 @@ export type Handover = {
 
 export type HandoverCreate = Pick<Handover, 'handover_id'> &
   Partial<Omit<Handover, 'handover_id'>>
+
+// A handover record plus its semantic-search relevance score (0–1).
+export type HandoverRanked = Handover & {
+  score: number
+  document: string
+  reason?: string | null
+}
 
 export const teamsOptions = [
     { team_id: "ESG", team_name: "ESG" },

@@ -1,5 +1,17 @@
 import { request } from './client'
-import type { Handover, HandoverCreate } from '../types'
+import type { Handover, HandoverCreate, HandoverRanked } from '../types'
+import { pageQuery } from './paging'
+import type { Paged, PageParams } from './paging'
+
+// Natural-language semantic search, ranked by the local embedding service.
+// `rerank` re-sorts the top hits with the LLM (learns from marked feedback).
+export function semanticSearchHandovers(q: string, limit = 30, rerank = false) {
+  return request<HandoverRanked[]>(
+    `/handovers/semantic-search?q=${encodeURIComponent(q)}&limit=${limit}${
+      rerank ? '&rerank=true' : ''
+    }`,
+  )
+}
 
 export function listHandovers(deviceId?: string, fromUserId?: string, toUserId?: string) {
   const params = new URLSearchParams()
@@ -8,6 +20,17 @@ export function listHandovers(deviceId?: string, fromUserId?: string, toUserId?:
   if (toUserId) params.set('to_user_id', toUserId)
   const query = params.toString()
   return request<Handover[]>(`/handovers${query ? `?${query}` : ''}`)
+}
+
+export function pageHandovers(params: PageParams) {
+  return request<Paged<Handover>>(`/handovers/page?${pageQuery(params)}`)
+}
+
+export function restoreHandover(handoverId: string) {
+  return request<Handover>(
+    `/handovers/${encodeURIComponent(handoverId)}/restore`,
+    { method: 'POST' },
+  )
 }
 
 export function getHandover(handoverId: string) {
@@ -28,8 +51,18 @@ export function updateHandover(handoverId: string, patch: Partial<Handover>) {
   })
 }
 
-export function deleteHandover(handoverId: string) {
-  return request<void>(`/handovers/${encodeURIComponent(handoverId)}`, {
+export function deleteHandover(handoverId: string, permanent = false) {
+  const query = permanent ? '?permanent=true' : ''
+  return request<void>(
+    `/handovers/${encodeURIComponent(handoverId)}${query}`,
+    { method: 'DELETE' },
+  )
+}
+
+// Bulk delete by id (soft-delete, or purge when permanent).
+export function deleteHandoversBatch(ids: string[], permanent = false) {
+  return request<void>(`/handovers/batch${permanent ? '?permanent=true' : ''}`, {
     method: 'DELETE',
+    body: JSON.stringify(ids),
   })
 }

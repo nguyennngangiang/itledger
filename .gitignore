@@ -1,3 +1,12 @@
 __pycache__/
 .env
 node_modules
+
+# One-off data / import scaffolding (see CLAUDE.md)
+REAL-DATA.xlsx
+import_data.json
+dist/
+
+# Host AI service: local venv + downloaded model cache
+ai/.venv/
+ai/.models/
