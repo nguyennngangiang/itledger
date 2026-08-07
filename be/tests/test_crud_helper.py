@@ -81,3 +81,48 @@ def test_the_real_specs_are_internally_consistent(spec):
 
 def test_every_spec_names_a_distinct_table():
     assert len({s.name for s in SPECS}) == len(SPECS)
+
+
+# --- end to end ------------------------------------------------------------
+# The unit tests above prove a bad literal cannot build a Table. These prove the
+# other half: a hostile order_by off the query string is replaced rather than
+# interpolated. Devices already had this; now all four page endpoints do, since
+# they share one paginate() and a regression would hit every screen at once.
+
+PAGE_ENDPOINTS = ["/devices/page", "/users/page", "/handovers/page", "/maintenance/page"]
+
+HOSTILE = [
+    "deleted_at",  # a real column, deliberately not sortable
+    "; DROP TABLE users; --",
+    "1",
+    "(SELECT 1)",
+    "serial_number; DELETE FROM devices",
+    "name DESC, (SELECT pg_sleep(10))",
+]
+
+
+@pytest.mark.parametrize("endpoint", PAGE_ENDPOINTS)
+@pytest.mark.parametrize("order_by", HOSTILE)
+async def test_page_falls_back_instead_of_interpolating(
+    client, seed, endpoint, order_by
+):
+    baseline = (await client.get(endpoint, params={"limit": 100})).json()
+
+    r = await client.get(endpoint, params={"order_by": order_by, "limit": 100})
+    assert r.status_code == 200, r.text
+    # Same rows in the same order as the default sort: the value was replaced,
+    # not honoured and not rejected.
+    assert r.json() == baseline
+
+    # And nothing was executed as a side effect.
+    assert (await client.get(endpoint, params={"limit": 100})).json() == baseline
+
+
+@pytest.mark.parametrize("endpoint", PAGE_ENDPOINTS)
+async def test_page_still_honours_a_legitimate_sort(client, seed, endpoint):
+    asc = await client.get(endpoint, params={"order": "asc", "limit": 100})
+    desc = await client.get(endpoint, params={"order": "desc", "limit": 100})
+    assert asc.status_code == desc.status_code == 200
+    assert asc.json()["total"] == desc.json()["total"]
+    if asc.json()["total"] > 1:
+        assert asc.json()["rows"] != desc.json()["rows"]

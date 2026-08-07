@@ -136,6 +136,25 @@ TABLE = _crud.Table(
 )
 
 
+def _keyword(where: _crud.Where, q: str) -> None:
+    """The free-text predicate, shared by list_page and search.
+
+    The Vietnamese free-text columns are unaccent()-wrapped so "hong" finds
+    "hỏng"; device_id/part/team are codes and short labels, where the accents do
+    not arise. device_owner_match reaches the owner through the device, so a
+    repair can be found by whose machine it was.
+    """
+    i = where.bind(f"%{q}%")
+    where.add(
+        f"(device_id ILIKE ${i} OR part ILIKE ${i} OR team ILIKE ${i} "
+        f"OR unaccent(reason) ILIKE unaccent(${i}) "
+        f"OR unaccent(solution) ILIKE unaccent(${i}) "
+        f"OR unaccent(result) ILIKE unaccent(${i}) "
+        f"OR unaccent(remarks) ILIKE unaccent(${i}) "
+        f"OR {device_owner_match('maintenance.device_id', i)})"
+    )
+
+
 async def list_page(
     pool: asyncpg.Pool,
     *,
@@ -146,47 +165,23 @@ async def list_page(
     deleted: bool = False,
     q: str | None = None,
 ) -> tuple[list[dict], int]:
-    conditions = ["deleted_at IS NOT NULL" if deleted else "deleted_at IS NULL"]
-    params: list = []
+    where = _crud.Where()
+    where.live(deleted)
     if q:
-        params.append(f"%{q}%")
-        i = len(params)
-        conditions.append(
-            f"(device_id ILIKE ${i} OR part ILIKE ${i} OR team ILIKE ${i} "
-            f"OR unaccent(reason) ILIKE unaccent(${i}) "
-            f"OR unaccent(solution) ILIKE unaccent(${i}) "
-            f"OR unaccent(result) ILIKE unaccent(${i}) "
-            f"OR unaccent(remarks) ILIKE unaccent(${i}) "
-            f"OR {device_owner_match('maintenance.device_id', i)})"
-        )
-    where = " WHERE " + " AND ".join(conditions)
-    ob = order_by if order_by in SORTABLE_FIELDS else "maintenance_date"
-    od = "DESC" if str(order).lower() == "desc" else "ASC"
-
-    total = await pool.fetchval(f"SELECT count(*) FROM maintenance{where}", *params)
-    params.append(limit)
-    params.append(offset)
-    rows = await pool.fetch(
-        f"SELECT {COLUMNS} FROM maintenance{where} "
-        f"ORDER BY {ob} {od}, maintenance_id LIMIT ${len(params) - 1} OFFSET ${len(params)}",
-        *params,
+        _keyword(where, q)
+    return await _crud.paginate(
+        pool, TABLE, where,
+        limit=limit, offset=offset, order_by=order_by, order=order,
     )
-    return [dict(r) for r in rows], total
 
 
 async def search(pool: asyncpg.Pool, q: str) -> list[dict]:
-    pattern = f"%{q}%"
+    where = _crud.Where()
+    where.live(False)
+    _keyword(where, q)
     rows = await pool.fetch(
-        f"""SELECT {COLUMNS} FROM maintenance
-            WHERE deleted_at IS NULL
-              AND (device_id ILIKE $1 OR part ILIKE $1 OR team ILIKE $1
-                   OR unaccent(reason) ILIKE unaccent($1)
-                   OR unaccent(solution) ILIKE unaccent($1)
-                   OR unaccent(result) ILIKE unaccent($1)
-                   OR unaccent(remarks) ILIKE unaccent($1)
-                   OR {device_owner_match('maintenance.device_id', 1)})
-            ORDER BY maintenance_id""",
-        pattern,
+        f"SELECT {COLUMNS} FROM maintenance{where.sql()} ORDER BY maintenance_id",
+        *where.params,
     )
     return [dict(r) for r in rows]
 

@@ -121,6 +121,25 @@ async def list_devices(pool: asyncpg.Pool, user_id: str | None = None) -> list[d
     return [dict(r) for r in rows]
 
 
+def _keyword(where: _crud.Where, q: str) -> None:
+    """The free-text predicate, written once and shared by list_page and search.
+
+    It used to be spelled out in both, and they had drifted: search matched only
+    the serial, the device name and the owner, so typing "Dell" into Ask AI's
+    find_devices tool found nothing while the same word in the table's search box
+    worked. This is the wider of the two.
+
+    owner_match EXISTS-joins users rather than JOINing, because a JOIN would
+    multiply rows and break the count(*) — see repositories/__init__.py.
+    """
+    i = where.bind(f"%{q}%")
+    where.add(
+        f"(serial_number ILIKE ${i} OR unaccent(name) ILIKE unaccent(${i}) "
+        f"OR unaccent(brand) ILIKE unaccent(${i}) OR os ILIKE ${i} "
+        f"OR {owner_match('devices.user_id', i)})"
+    )
+
+
 async def list_page(
     pool: asyncpg.Pool,
     *,
@@ -133,33 +152,16 @@ async def list_page(
     status: str | None = None,
 ) -> tuple[list[dict], int]:
     """Paginated + sortable + searchable device list. Returns (rows, total)."""
-    conditions = ["deleted_at IS NOT NULL" if deleted else "deleted_at IS NULL"]
-    params: list = []
+    where = _crud.Where()
+    where.live(deleted)
     if status:
-        params.append(status)
-        conditions.append(f"status = ${len(params)}")
+        where.eq("status", status)
     if q:
-        params.append(f"%{q}%")
-        i = len(params)
-        conditions.append(
-            f"(serial_number ILIKE ${i} OR unaccent(name) ILIKE unaccent(${i}) "
-            f"OR unaccent(brand) ILIKE unaccent(${i}) OR os ILIKE ${i} "
-            f"OR {owner_match('devices.user_id', i)})"
-        )
-    where = " WHERE " + " AND ".join(conditions)
-
-    ob = order_by if order_by in SORTABLE_FIELDS else "serial_number"
-    od = "DESC" if str(order).lower() == "desc" else "ASC"
-
-    total = await pool.fetchval(f"SELECT count(*) FROM devices{where}", *params)
-    params.append(limit)
-    params.append(offset)
-    rows = await pool.fetch(
-        f"SELECT {COLUMNS} FROM devices{where} "
-        f"ORDER BY {ob} {od}, serial_number LIMIT ${len(params) - 1} OFFSET ${len(params)}",
-        *params,
+        _keyword(where, q)
+    return await _crud.paginate(
+        pool, TABLE, where,
+        limit=limit, offset=offset, order_by=order_by, order=order,
     )
-    return [dict(r) for r in rows], total
 
 
 async def get(pool: asyncpg.Pool, serial_number: str) -> dict | None:
@@ -277,12 +279,12 @@ async def import_devices(pool: asyncpg.Pool, devices: list[DeviceCreate]) -> dic
 async def search(pool: asyncpg.Pool, q: str) -> list[dict]:
     # Also backs the assistant's find_devices tool, so Ask AI can look a machine
     # up by who holds it, not just by serial.
+    where = _crud.Where()
+    where.live(False)
+    _keyword(where, q)
     rows = await pool.fetch(
-        f"SELECT {COLUMNS} FROM devices "
-        f"WHERE deleted_at IS NULL AND (serial_number ILIKE $1 "
-        f"OR unaccent(name) ILIKE unaccent($1) "
-        f"OR {owner_match('devices.user_id', 1)})",
-        f"%{q}%",
+        f"SELECT {COLUMNS} FROM devices{where.sql()} ORDER BY serial_number",
+        *where.params,
     )
     return [dict(r) for r in rows]
 

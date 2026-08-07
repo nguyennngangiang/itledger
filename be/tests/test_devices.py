@@ -219,6 +219,42 @@ async def test_filter_rejects_columns_outside_the_allowlist(client, seed):
     assert (await client.get("/devices/page")).json()["total"] == 3  # table intact
 
 
+class TestSearchMatchesTheSameColumnsAsThePage:
+    """/devices/search used to be narrower than the page's search box.
+
+    Both spelled the predicate out separately and they drifted: search omitted
+    `brand` and `os`, so typing "Dell" into Ask AI (which calls find_devices ->
+    repo.search) found nothing while the same word in the Devices table worked.
+    They now share one predicate, which widens search — recorded here on purpose.
+    """
+
+    @pytest.mark.parametrize(
+        "q, expected",
+        [
+            ("Asus", "SN-QUAN-1"),      # brand — was missing from search
+            ("Windows 10", "SN-STORE-1"),  # os — was missing from search
+            ("SN-GIANG", "SN-GIANG-1"),    # serial — always worked
+            ("HP Core", "SN-GIANG-1"),     # device name — always worked
+            ("Quân", "SN-QUAN-1"),         # owner name — always worked
+            ("quan", "SN-QUAN-1"),         # owner name, unaccented
+        ],
+    )
+    async def test_search_finds_it(self, client, seed, q, expected):
+        r = await client.get("/devices/search", params={"q": q})
+        assert r.status_code == 200, r.text
+        assert expected in [d["serial_number"] for d in r.json()]
+
+    @pytest.mark.parametrize("q", ["Asus", "Windows 10", "SN-GIANG", "Quân"])
+    async def test_search_and_page_agree(self, client, seed, q):
+        search = {d["serial_number"] for d in (
+            await client.get("/devices/search", params={"q": q})
+        ).json()}
+        page = {d["serial_number"] for d in (
+            await client.get("/devices/page", params={"q": q, "limit": 100})
+        ).json()["rows"]}
+        assert search == page
+
+
 class TestPurgingADeviceWithHistory:
     """Handovers and maintenance FK to devices and nothing cascades.
 

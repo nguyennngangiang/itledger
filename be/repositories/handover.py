@@ -159,6 +159,27 @@ TABLE = _crud.Table(
 )
 
 
+def _keyword(where: _crud.Where, q: str) -> None:
+    """The free-text predicate. Both parties are reachable by name, not just code."""
+    i = where.bind(f"%{q}%")
+    where.add(
+        f"(device_id ILIKE ${i} OR reason ILIKE ${i} "
+        f"OR {owner_match('handovers.from_user_id', i)} "
+        f"OR {owner_match('handovers.to_user_id', i)})"
+    )
+
+
+def _page_tie_break(column: str, direction: str) -> str:
+    """Same-day ordering, for _crud.paginate.
+
+    Sorting by date leaves same-day rows tied, so apply the same collect-then-
+    issue rule the device history uses; otherwise the table shows a machine going
+    back to the store *after* it was handed out. Only for a date sort — the other
+    columns are unique enough to order themselves.
+    """
+    return _same_day(direction == "DESC") if column == "handover_date" else ""
+
+
 async def list_page(
     pool: asyncpg.Pool,
     *,
@@ -169,35 +190,15 @@ async def list_page(
     deleted: bool = False,
     q: str | None = None,
 ) -> tuple[list[dict], int]:
-    conditions = ["deleted_at IS NOT NULL" if deleted else "deleted_at IS NULL"]
-    params: list = []
+    where = _crud.Where()
+    where.live(deleted)
     if q:
-        params.append(f"%{q}%")
-        i = len(params)
-        conditions.append(
-            f"(device_id ILIKE ${i} OR reason ILIKE ${i} "
-            f"OR {owner_match('handovers.from_user_id', i)} "
-            f"OR {owner_match('handovers.to_user_id', i)})"
-        )
-    where = " WHERE " + " AND ".join(conditions)
-    ob = order_by if order_by in SORTABLE_FIELDS else "handover_date"
-    od = "DESC" if str(order).lower() == "desc" else "ASC"
-
-    total = await pool.fetchval(f"SELECT count(*) FROM handovers{where}", *params)
-    params.append(limit)
-    params.append(offset)
-    # Sorting by date leaves same-day rows tied, so apply the same collect-then-
-    # issue rule the device history uses; otherwise the table shows a machine
-    # going back to the store *after* it was handed out. Only for a date sort —
-    # the other columns are unique enough to order themselves.
-    same_day = f"{_same_day(od == 'DESC')}, " if ob == "handover_date" else ""
-    rows = await pool.fetch(
-        f"SELECT {COLUMNS} FROM handovers{where} "
-        f"ORDER BY {ob} {od}, {same_day}handover_id "
-        f"LIMIT ${len(params) - 1} OFFSET ${len(params)}",
-        *params,
+        _keyword(where, q)
+    return await _crud.paginate(
+        pool, TABLE, where,
+        limit=limit, offset=offset, order_by=order_by, order=order,
+        tie_break=_page_tie_break,
     )
-    return [dict(r) for r in rows], total
 
 
 async def get(pool: asyncpg.Pool, handover_id: str) -> dict | None:

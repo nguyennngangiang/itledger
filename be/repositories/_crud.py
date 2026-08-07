@@ -27,6 +27,7 @@ Identifiers arrive only as `Table` fields or as members of a `Table`-validated
 allowlist. User values arrive only through `Where.bind()`.
 """
 import re
+from collections.abc import Callable
 from dataclasses import dataclass
 
 import asyncpg
@@ -79,6 +80,89 @@ class Table:
             raise ValueError(
                 f"{self.name}: default_sort {self.default_sort!r} is not in sortable"
             )
+
+
+class Where:
+    """Accumulates conditions and the values they bind to.
+
+    Not a query builder — it does not know what a table or a JOIN is. Callers
+    write SQL fragments from module-level literals and ask `bind()` for the
+    placeholder index to put in them, which is the half that was duplicated:
+    every list_page open-coded `params.append(x); i = len(params)` and then
+    `LIMIT ${len(params) - 1} OFFSET ${len(params)}`, four times, with the count
+    query depending on running before the limit was appended.
+
+    User values reach SQL only through bind(). They never appear in a fragment.
+    """
+
+    def __init__(self) -> None:
+        self.conditions: list[str] = []
+        self.params: list = []
+
+    def bind(self, value) -> int:
+        """Register a value and return its $n index."""
+        self.params.append(value)
+        return len(self.params)
+
+    def add(self, sql: str) -> None:
+        """Add a condition. `sql` must come from a literal, not from user input."""
+        self.conditions.append(sql)
+
+    def eq(self, column: str, value) -> None:
+        self.add(f"{_ident(column)} = ${self.bind(value)}")
+
+    def live(self, deleted: bool) -> None:
+        """Trash filter: the trash view when `deleted`, otherwise active rows."""
+        self.add("deleted_at IS NOT NULL" if deleted else "deleted_at IS NULL")
+
+    def sql(self) -> str:
+        return (" WHERE " + " AND ".join(self.conditions)) if self.conditions else ""
+
+
+async def paginate(
+    pool: asyncpg.Pool,
+    spec: Table,
+    where: Where,
+    *,
+    limit: int,
+    offset: int,
+    order_by: str,
+    order: str,
+    tie_break: Callable[[str, str], str] | None = None,
+) -> tuple[list[dict], int]:
+    """One page plus the unpaged total, for an already-built Where.
+
+    `order_by` arrives from the query string: it is matched against the
+    allowlist and REPLACED on a miss, never rejected-then-used, so it cannot
+    reach SQL as itself. The pk is always appended as the final tie-break so
+    paging is stable when the sort column has duplicates.
+
+    `tie_break` lets a resource inject its own middle tie-break, given the
+    resolved (column, direction). Handovers use it for same-day ordering; the
+    helper only decides where the fragment goes, and knows nothing about it.
+    """
+    column = _ident(order_by if order_by in spec.sortable else spec.default_sort)
+    direction = "DESC" if str(order).lower() == "desc" else "ASC"
+    clause = where.sql()
+
+    # Snapshot before binding limit/offset. The old code relied on the count
+    # query simply running before those were appended, which was true but broke
+    # the moment anyone reordered two lines.
+    count_params = list(where.params)
+    total = await pool.fetchval(
+        f"SELECT count(*) FROM {spec.name}{clause}", *count_params
+    )
+
+    fragment = tie_break(column, direction) if tie_break else ""
+    middle = f"{fragment}, " if fragment else ""
+    limit_at, offset_at = where.bind(limit), where.bind(offset)
+    rows = await pool.fetch(
+        f"SELECT {spec.columns} FROM {spec.name}{clause} "
+        f"ORDER BY {column} {direction}, {middle}{spec.pk} "
+        f"LIMIT ${limit_at} OFFSET ${offset_at}",
+        *where.params,
+    )
+    return [dict(r) for r in rows], total
 
 
 async def soft_delete(pool: asyncpg.Pool, spec: Table, key: str) -> bool:

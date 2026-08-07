@@ -138,6 +138,18 @@ TABLE = _crud.Table(
 )
 
 
+def _keyword(where: _crud.Where, q: str) -> None:
+    """The free-text predicate, shared by list_page and search.
+
+    unaccent on the Vietnamese text columns so "van" finds "Vân".
+    """
+    i = where.bind(f"%{q}%")
+    where.add(
+        f"(employee_code ILIKE ${i} OR unaccent(name) ILIKE unaccent(${i}) "
+        f"OR unaccent(team) ILIKE unaccent(${i}))"
+    )
+
+
 async def list_page(
     pool: asyncpg.Pool,
     *,
@@ -159,45 +171,24 @@ async def list_page(
     need it; it is only hidden from the list of people. Excluding it here rather
     than in the UI keeps `total` and the pagination honest.
     """
-    params: list = [GHOST_CODE]
-    conditions = [
-        "deleted_at IS NOT NULL" if deleted else "deleted_at IS NULL",
-        "employee_code <> $1",
-    ]
+    where = _crud.Where()
+    where.live(deleted)
+    where.add(f"employee_code <> ${where.bind(GHOST_CODE)}")
     if team:
-        params.append(team)
-        conditions.append(f"team = ${len(params)}")
+        where.eq("team", team)
     if status in STATUSES:
-        params.append(status)
-        conditions.append(f"status = ${len(params)}")
+        where.eq("status", status)
     # The 35 people the HR export has no record of arrived without a department,
     # and there is no source to fill them from — so the screen needs a way to find
     # them rather than scrolling 200 rows looking for blanks.
     if no_team:
-        conditions.append("coalesce(btrim(team), '') = ''")
+        where.add("coalesce(btrim(team), '') = ''")
     if q:
-        params.append(f"%{q}%")
-        i = len(params)
-        # unaccent on the Vietnamese text columns so "van" finds "Vân".
-        conditions.append(
-            f"(employee_code ILIKE ${i} OR unaccent(name) ILIKE unaccent(${i}) "
-            f"OR unaccent(team) ILIKE unaccent(${i}))"
-        )
-    where = " WHERE " + " AND ".join(conditions)
-
-    ob = order_by if order_by in SORTABLE_FIELDS else "employee_code"
-    od = "DESC" if str(order).lower() == "desc" else "ASC"
-
-    total = await pool.fetchval(f"SELECT count(*) FROM users{where}", *params)
-    params.append(limit)
-    params.append(offset)
-    rows = await pool.fetch(
-        f"SELECT {COLUMNS} FROM users{where} "
-        f"ORDER BY {ob} {od}, employee_code "
-        f"LIMIT ${len(params) - 1} OFFSET ${len(params)}",
-        *params,
+        _keyword(where, q)
+    return await _crud.paginate(
+        pool, TABLE, where,
+        limit=limit, offset=offset, order_by=order_by, order=order,
     )
-    return [dict(r) for r in rows], total
 
 
 async def get(pool: asyncpg.Pool, employee_code: str) -> dict | None:
@@ -286,14 +277,11 @@ async def delete_many(
 
 
 async def search(pool: asyncpg.Pool, q: str) -> list[dict]:
-    pattern = f"%{q}%"
+    where = _crud.Where()
+    where.live(False)
+    _keyword(where, q)
     rows = await pool.fetch(
-        f"""SELECT {COLUMNS} FROM users
-            WHERE deleted_at IS NULL
-              AND (employee_code ILIKE $1
-               OR unaccent(name) ILIKE unaccent($1)
-               OR unaccent(team) ILIKE unaccent($1))""",
-        pattern,
+        f"SELECT {COLUMNS} FROM users{where.sql()}", *where.params
     )
     return [dict(r) for r in rows]
 
