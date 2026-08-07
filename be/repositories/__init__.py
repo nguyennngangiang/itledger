@@ -45,6 +45,26 @@ async def distinct_values(
     return [r["v"] for r in rows]
 
 
+async def suggestion_map(
+    pool: asyncpg.Pool, table: str, allowed: frozenset[str]
+) -> dict[str, list[str]]:
+    """Every suggestable column of one resource, in one response.
+
+    The three routers each open-coded this comprehension with the table name as
+    a hardcoded string — which is exactly the sort of literal that should live
+    next to the resource's other identifiers. Callers pass `TABLE.name`, so the
+    table is _crud._ident()-checked at import rather than by convention.
+
+    Still one query per column: at this size the round-trips are the cost, not
+    the scans, and the form opens rarely enough that eight of them are cheaper
+    than the UNION query that would replace them.
+    """
+    return {
+        column: await distinct_values(pool, table, column, allowed)
+        for column in sorted(allowed)
+    }
+
+
 def owner_match(col: str, i: int) -> str:
     """SQL fragment: does the person referenced by `col` match placeholder $i?
 

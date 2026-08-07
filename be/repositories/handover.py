@@ -6,7 +6,7 @@ import asyncpg
 
 from ..constants import GHOST_CODE
 from ..models.handover import HandoverCreate, HandoverUpdate
-from . import _crud, owner_match
+from . import _crud, owner_match, suggestion_map
 from .errors import DuplicateError, ForeignKeyError
 
 COLUMNS = (
@@ -232,6 +232,11 @@ async def update(
             f"{fields.get('to_user_id')}"
         ) from e
     return dict(row) if row else None
+
+
+async def suggestions(pool: asyncpg.Pool) -> dict[str, list[str]]:
+    """Values already in use, per suggestable column — feeds form autocomplete."""
+    return await suggestion_map(pool, TABLE.name, SUGGESTABLE_FIELDS)
 
 
 async def delete(pool: asyncpg.Pool, handover_id: str) -> bool:

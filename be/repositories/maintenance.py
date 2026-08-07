@@ -5,7 +5,7 @@ asyncpg uses $1, $2 ... placeholders — never string-format user values into SQ
 import asyncpg
 
 from ..models.maintenance import MaintenanceCreate, MaintenanceUpdate
-from . import _crud, device_owner_match
+from . import _crud, device_owner_match, suggestion_map
 from .errors import DuplicateError, ForeignKeyError
 
 COLUMNS = (
@@ -228,6 +228,11 @@ async def restore(pool: asyncpg.Pool, maintenance_id: str) -> bool:
 
 async def purge(pool: asyncpg.Pool, maintenance_id: str) -> bool:
     return await _crud.purge(pool, TABLE, maintenance_id)
+
+
+async def suggestions(pool: asyncpg.Pool) -> dict[str, list[str]]:
+    """Values already in use, per suggestable column — feeds form autocomplete."""
+    return await suggestion_map(pool, TABLE.name, SUGGESTABLE_FIELDS)
 
 
 async def counts_by_device(pool: asyncpg.Pool) -> dict[str, int]:

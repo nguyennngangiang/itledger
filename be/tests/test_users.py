@@ -252,3 +252,39 @@ async def test_teams_collapses_case_variants(client, seed):
     await client.post("/users", json={"employee_code": "T-9", "team": "it"})
     assert "it" not in (await client.get("/users/teams")).json()
     assert "IT" in (await client.get("/users/teams")).json()
+
+
+class TestCreateBatch:
+    """POST /users/batch was not transactional, and had no test.
+
+    The frontend declares createUserBatch (fe/src/api/users.ts) but never calls
+    it, so nothing exercised the endpoint and a half-applied batch went unnoticed.
+    """
+
+    async def test_a_duplicate_mid_batch_leaves_nothing_behind(self, client, seed):
+        before = (await client.get("/users/page", params={"limit": 100})).json()["total"]
+        # VPHN216 is seeded, so row 3 collides. Rows 1-2 used to be committed.
+        r = await client.post("/users/batch", json=[
+            {"employee_code": "T-1", "name": "One"},
+            {"employee_code": "T-2", "name": "Two"},
+            {"employee_code": "VPHN216", "name": "Clash"},
+        ])
+        assert r.status_code == 409, r.text
+        assert "VPHN216" in r.json()["detail"]
+
+        after = await client.get("/users/page", params={"limit": 100})
+        codes = [u["employee_code"] for u in after.json()["rows"]]
+        assert "T-1" not in codes
+        assert "T-2" not in codes
+        assert after.json()["total"] == before
+
+    async def test_a_clean_batch_still_works(self, client, seed):
+        before = (await client.get("/users/page", params={"limit": 100})).json()["total"]
+        r = await client.post("/users/batch", json=[
+            {"employee_code": "T-3", "name": "Three"},
+            {"employee_code": "T-4", "name": "Four"},
+        ])
+        assert r.status_code == 201, r.text
+        assert len(r.json()) == 2
+        after = (await client.get("/users/page", params={"limit": 100})).json()["total"]
+        assert after == before + 2

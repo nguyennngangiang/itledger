@@ -4,39 +4,27 @@ Parse the request, call the repository, translate domain errors / missing rows
 to HTTP status codes. No SQL here — that lives in repositories/user.py.
 """
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel
 
 from ..db import get_pool
+from ..models.page import Page
 from ..models.user import UserCreate, UserOut, UserUpdate, UserDelete
 from ..repositories import user as repo
-from ..repositories.errors import (
-    DuplicateError,
-    ForeignKeyError,
-    InUseError,
-    ProtectedError,
-)
 
 router = APIRouter(prefix="/users", tags=["users"])
 
-
-class UserPage(BaseModel):
-    rows: list[UserOut]
-    total: int
+# DuplicateError / ForeignKeyError / InUseError / ProtectedError are mapped to
+# 409 centrally in main.py, so nothing here catches them.
+UserPage = Page[UserOut]
 
 
 @router.post("", response_model=UserOut, status_code=201)
 async def create_user(user: UserCreate, pool=Depends(get_pool)):
-    try:
-        return await repo.create(pool, user)
-    except DuplicateError as e:
-        raise HTTPException(409, str(e))
+    return await repo.create(pool, user)
+
 
 @router.post("/batch", response_model=list[UserOut], status_code=201)
 async def create_user_batch(users: list[UserCreate], pool=Depends(get_pool)):
-    try:
-        return await repo.create_batch(pool, users)
-    except DuplicateError as e:
-        raise HTTPException(409, str(e))
+    return await repo.create_batch(pool, users)
 
 
 @router.post("/restore", response_model=UserOut)
@@ -113,10 +101,7 @@ async def get_user(employee_code: str, pool=Depends(get_pool)):
 async def update_user(
     employee_code: str, user: UserUpdate, pool=Depends(get_pool)
 ):
-    try:
-        updated = await repo.update(pool, employee_code, user)
-    except ProtectedError as e:
-        raise HTTPException(409, str(e))
+    updated = await repo.update(pool, employee_code, user)
     if updated is None:
         raise HTTPException(404, f"User not found: {employee_code}")
     return updated
@@ -126,14 +111,12 @@ async def update_user(
 async def delete_user(
     user: UserDelete, permanent: bool = False, pool=Depends(get_pool)
 ):
+    # A refusal — the ghost account, someone still holding devices, or history
+    # that references them — reaches the client as 409 via main.py.
     action = repo.purge if permanent else repo.delete
-    try:
-        if not await action(pool, user.employee_code):
-            raise HTTPException(404, f"User not found: {user.employee_code}")
-    except (ProtectedError, InUseError, ForeignKeyError) as e:
-        # Refusing on purpose: the ghost account, someone still holding
-        # devices, or history that still references them.
-        raise HTTPException(409, str(e))
+    if not await action(pool, user.employee_code):
+        raise HTTPException(404, f"User not found: {user.employee_code}")
+
 
 @router.delete("/batch", status_code=204)
 async def delete_user_batch(
@@ -142,7 +125,4 @@ async def delete_user_batch(
     """Bulk delete by employee code. Soft-delete by default; `permanent=true`
     purges from the trash. Unknown codes are ignored (no 404), but a protected
     or still-in-use code fails the whole call rather than being skipped."""
-    try:
-        await repo.delete_many(pool, codes, permanent=permanent)
-    except (ProtectedError, InUseError, ForeignKeyError) as e:
-        raise HTTPException(409, str(e))
+    await repo.delete_many(pool, codes, permanent=permanent)

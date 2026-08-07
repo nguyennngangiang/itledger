@@ -4,69 +4,45 @@ Parse the request, call the repository, translate domain errors / missing rows
 to HTTP status codes. No SQL here — that lives in repositories/device.py.
 """
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel
 
 from ..db import get_pool
 from ..documents import device_document
-from ..repositories import distinct_values
 from ..search import rank
 from .. import llm
 from ..models.device import DeviceCreate, DeviceOut, DeviceUpdate, DeviceDelete
+from ..models.page import ImportResult, Page, Ranked
 from ..repositories import device as repo
 from ..repositories import feedback as feedback_repo
 from ..repositories import maintenance as maint_repo
 from ..repositories import user as user_repo
-from ..repositories.errors import DuplicateError, ForeignKeyError
 
 router = APIRouter(prefix="/devices", tags=["devices"])
 
-
-class DevicePage(BaseModel):
-    rows: list[DeviceOut]
-    total: int
-
-
-class ImportResult(BaseModel):
-    inserted: int
-    skipped: int
-    total: int
+# DuplicateError / ForeignKeyError are mapped to 409 centrally in main.py, so
+# nothing here catches them. ValueError still is, locally — see filter_devices.
+DevicePage = Page[DeviceOut]
 
 
-class DeviceRanked(DeviceOut):
+class DeviceRanked(DeviceOut, Ranked):
     """A device plus its semantic-similarity score (0–1), the exact sentence the
     embedder ranked it on (`document`), and — when the LLM reranker ran — its
     one-line `reason` for the placement."""
-    score: float
-    document: str
-    reason: str | None = None
 
 
 @router.post("", response_model=DeviceOut, status_code=201)
 async def create_device(device: DeviceCreate, pool=Depends(get_pool)):
-    try:
-        return await repo.create(pool, device)
-    except DuplicateError as e:
-        raise HTTPException(409, str(e))
-    except ForeignKeyError as e:
-        raise HTTPException(409, str(e))
+    return await repo.create(pool, device)
+
 
 @router.post("/batch", response_model=list[DeviceOut], status_code=201)
 async def create_device_batch(devices: list[DeviceCreate], pool=Depends(get_pool)):
-    try:
-        return await repo.create_batch(pool, devices)
-    except DuplicateError as e:
-        raise HTTPException(409, str(e))
-    except ForeignKeyError as e:
-        raise HTTPException(409, str(e))
+    return await repo.create_batch(pool, devices)
 
 
 @router.post("/import", response_model=ImportResult)
 async def import_devices(devices: list[DeviceCreate], pool=Depends(get_pool)):
     """Bulk import from an uploaded xlsx/csv. Skips serials that already exist."""
-    try:
-        return await repo.import_devices(pool, devices)
-    except ForeignKeyError as e:
-        raise HTTPException(409, str(e))
+    return await repo.import_devices(pool, devices)
 
 
 @router.get("", response_model=list[DeviceOut])
@@ -110,10 +86,7 @@ async def device_suggestions(pool=Depends(get_pool)):
     them and opens often, so this is one round-trip instead of eight. Declared
     before /{serial_number} so "suggestions" isn't read as a serial number.
     """
-    return {
-        field: await distinct_values(pool, "devices", field, repo.SUGGESTABLE_FIELDS)
-        for field in sorted(repo.SUGGESTABLE_FIELDS)
-    }
+    return await repo.suggestions(pool)
 
 
 @router.get("/filter", response_model=list[DeviceOut])
@@ -184,12 +157,7 @@ async def get_device(serial_number: str, pool=Depends(get_pool)):
 async def update_device(
     serial_number: str, device: DeviceUpdate, pool=Depends(get_pool)
 ):
-    try:
-        updated = await repo.update(pool, serial_number, device)
-    except DuplicateError as e:
-        raise HTTPException(409, str(e))
-    except ForeignKeyError as e:
-        raise HTTPException(409, str(e))
+    updated = await repo.update(pool, serial_number, device)
     if updated is None:
         raise HTTPException(404, f"Device not found: {serial_number}")
     return updated

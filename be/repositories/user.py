@@ -63,19 +63,24 @@ async def ensure_ghost(pool: asyncpg.Pool) -> None:
 
 
 async def create_batch(pool: asyncpg.Pool, users: list[UserCreate]) -> list[dict]:
+    """All-or-nothing. A duplicate code on row 5 must not leave rows 1-4
+    committed with no way for the caller to tell which landed."""
+    rows = []
     try:
-        rows = []
-        for user in users:
-            row = await pool.fetchrow(
-                f"""INSERT INTO users ({COLUMNS})
-                    VALUES ($1,$2,$3,$4)
-                    RETURNING {COLUMNS}""",
-                user.employee_code, user.name, user.team, user.status or ACTIVE,
-            )
-            rows.append(dict(row))
-        return rows
+        async with pool.acquire() as conn:
+            async with conn.transaction():
+                for user in users:
+                    row = await conn.fetchrow(
+                        f"""INSERT INTO users ({COLUMNS})
+                            VALUES ($1,$2,$3,$4)
+                            RETURNING {COLUMNS}""",
+                        user.employee_code, user.name, user.team,
+                        user.status or ACTIVE,
+                    )
+                    rows.append(dict(row))
     except asyncpg.UniqueViolationError as e:
         raise DuplicateError(f"User already exists: {user.employee_code}") from e
+    return rows
 
 async def create(pool: asyncpg.Pool, user: UserCreate) -> dict:
     try:

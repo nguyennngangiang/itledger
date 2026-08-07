@@ -7,7 +7,7 @@ import asyncpg
 
 from ..constants import GHOST_CODE, IT_HELD_STATUSES
 from ..models.device import DeviceCreate, DeviceUpdate
-from . import _crud, owner_match
+from . import _crud, owner_match, suggestion_map
 from .errors import DuplicateError, ForeignKeyError
 
 # --- identifiers -----------------------------------------------------------
@@ -66,23 +66,37 @@ def owner_for_status(status: str | None, user_id: str | None) -> str | None:
     return GHOST_CODE if status in IT_HELD_STATUSES else user_id
 
 async def create_batch(pool: asyncpg.Pool, devices: list[DeviceCreate]) -> list[dict]:
+    """All-or-nothing. A duplicate on row 5 must not leave rows 1-4 committed.
+
+    Also applies owner_for_status, which this used to skip while create() applied
+    it — so a batch containing a `maintaining` device left it sitting on a
+    person's name, defeating the rule create() exists to enforce.
+    """
+    rows = []
     try:
-        rows = []
-        for device in devices:
-            row = await pool.fetchrow(
-                f"""INSERT INTO devices ({COLUMNS})
-                    VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
-                    RETURNING {COLUMNS}""",
-                device.serial_number, device.barcode, device.type, device.brand,
-                device.cpu, device.ram, device.storage, device.os, device.msoffice,
-                device.buy_date, device.name, device.user_id, device.status,
-            )
-            rows.append(dict(row))
-        return rows
+        async with pool.acquire() as conn:
+            async with conn.transaction():
+                for device in devices:
+                    owner = owner_for_status(device.status, device.user_id)
+                    row = await conn.fetchrow(
+                        f"""INSERT INTO devices ({COLUMNS})
+                            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
+                            RETURNING {COLUMNS}""",
+                        device.serial_number, device.barcode, device.type,
+                        device.brand, device.cpu, device.ram, device.storage,
+                        device.os, device.msoffice, device.buy_date, device.name,
+                        owner, device.status,
+                    )
+                    rows.append(dict(row))
     except asyncpg.UniqueViolationError as e:
+        # `device` is still bound to the row that raised — the loop variable
+        # survives the exception leaving its body.
         raise DuplicateError(f"Device already exists: {device.serial_number}") from e
     except asyncpg.ForeignKeyViolationError as e:
-        raise ForeignKeyError(f"Unknown user_id: {device.user_id}") from e
+        raise ForeignKeyError(
+            f"Unknown user_id: {owner_for_status(device.status, device.user_id)}"
+        ) from e
+    return rows
 
 async def create(pool: asyncpg.Pool, device: DeviceCreate) -> dict:
     owner = owner_for_status(device.status, device.user_id)
@@ -287,6 +301,11 @@ async def search(pool: asyncpg.Pool, q: str) -> list[dict]:
         *where.params,
     )
     return [dict(r) for r in rows]
+
+async def suggestions(pool: asyncpg.Pool) -> dict[str, list[str]]:
+    """Values already in use, per suggestable column — feeds form autocomplete."""
+    return await suggestion_map(pool, TABLE.name, SUGGESTABLE_FIELDS)
+
 
 async def filter_devices(pool: asyncpg.Pool, field: str, value: str) -> list[dict]:
     """Filter devices by a single column. Column name is allowlisted — not user SQL."""

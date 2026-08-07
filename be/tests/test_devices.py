@@ -219,6 +219,50 @@ async def test_filter_rejects_columns_outside_the_allowlist(client, seed):
     assert (await client.get("/devices/page")).json()["total"] == 3  # table intact
 
 
+class TestCreateBatch:
+    """POST /devices/batch had two holes that create() did not.
+
+    Neither had a test, which is how they survived: the endpoint has no frontend
+    caller, so nothing exercised it.
+    """
+
+    async def test_a_duplicate_mid_batch_leaves_nothing_behind(self, client, seed):
+        # SN-QUAN-1 is already seeded, so row 3 collides. Rows 1-2 used to be
+        # committed anyway, leaving the caller unable to tell what landed.
+        r = await client.post("/devices/batch", json=[
+            {"serial_number": "SN-B1"},
+            {"serial_number": "SN-B2"},
+            {"serial_number": "SN-QUAN-1"},
+        ])
+        assert r.status_code == 409, r.text
+        assert "SN-QUAN-1" in r.json()["detail"]
+
+        page = await client.get("/devices/page", params={"limit": 100})
+        serials = [d["serial_number"] for d in page.json()["rows"]]
+        assert "SN-B1" not in serials
+        assert "SN-B2" not in serials
+        assert page.json()["total"] == 3  # unchanged
+
+    async def test_an_it_held_status_in_a_batch_still_parks_on_the_ghost(
+        self, client, seed
+    ):
+        # create() applies owner_for_status; create_batch used to skip it, so a
+        # batch could leave a machine under repair sitting on a person's name.
+        r = await client.post("/devices/batch", json=[
+            {"serial_number": "SN-B3", "user_id": "VPHN216", "status": "maintaining"},
+        ])
+        assert r.status_code == 201, r.text
+        assert r.json()[0]["user_id"] == GHOST
+        assert r.json()[0]["status"] == "maintaining"
+
+    async def test_a_clean_batch_still_works(self, client, seed):
+        r = await client.post("/devices/batch", json=[
+            {"serial_number": "SN-B4"}, {"serial_number": "SN-B5"},
+        ])
+        assert r.status_code == 201, r.text
+        assert (await client.get("/devices/page")).json()["total"] == 5
+
+
 class TestSearchMatchesTheSameColumnsAsThePage:
     """/devices/search used to be narrower than the page's search box.
 
