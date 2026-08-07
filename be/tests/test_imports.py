@@ -12,6 +12,8 @@ import pytest
 
 from be import handover_import, llm
 from be.handover_import import ISSUE, RETURN, TRANSFER
+from be.repositories import device as device_repo
+from be.repositories import user as user_repo
 from .conftest import GHOST
 
 # The real record, flattened as `idx | cell | cell` with date cells carrying their
@@ -814,3 +816,58 @@ async def test_recheck_leaves_a_handover_scoped_issue_for_a_human(client, seed):
     }]))
     assert (await client.post("/imports/issues/recheck")).json() == {"closed": 0}
     assert (await client.get("/imports/issues/count")).json() == {"open": 1}
+
+
+async def test_recheck_reads_the_referenced_rows_in_bulk(client, pool, seed, monkeypatch):
+    """The row lookups must not scale with the size of the backlog.
+
+    This used to re-read the referenced row inside the loop, so a full backlog
+    cost one query per issue — up to 500 sequential round-trips in a request the
+    Notifications screen makes before every list. Pinned as a count because the
+    behaviour tests above cannot see the difference: both versions give the same
+    answer, just one of them N times slower.
+    """
+    calls = {"device_get": 0, "user_get": 0, "device_get_many": 0, "user_get_many": 0}
+
+    def counted(module, name, key):
+        original = getattr(module, name)
+
+        async def wrapper(*a, **kw):
+            calls[key] += 1
+            return await original(*a, **kw)
+
+        monkeypatch.setattr(module, name, wrapper)
+
+    counted(device_repo, "get", "device_get")
+    counted(user_repo, "get", "user_get")
+    counted(device_repo, "get_many", "device_get_many")
+    counted(user_repo, "get_many", "user_get_many")
+
+    # Twelve issues across both resources, none of which the ledger has answered.
+    await client.post("/imports/handover/apply", json=_apply_body(issues=[
+        {
+            "kind": "device_created_incomplete", "resource": "devices",
+            "item_id": "SN-GIANG-1",
+            "payload": {"missing": ["barcode", "buy_date"], "n": n},
+        }
+        for n in range(6)
+    ] + [
+        {
+            "kind": "user_field_conflict", "resource": "users", "item_id": "VPHN228",
+            "payload": {"fields": [
+                {"field": "team", "current": "IT", "proposed": f"Ops{n}"},
+            ]},
+        }
+        for n in range(6)
+    ]))
+    for key in calls:
+        calls[key] = 0
+
+    r = await client.post("/imports/issues/recheck")
+    assert r.status_code == 200, r.text
+
+    assert calls["device_get_many"] == 1
+    assert calls["user_get_many"] == 1
+    # Zero per-issue reads, whatever the backlog size.
+    assert calls["device_get"] == 0
+    assert calls["user_get"] == 0

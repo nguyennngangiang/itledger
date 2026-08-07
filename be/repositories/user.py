@@ -52,11 +52,9 @@ ON CONFLICT (employee_code) DO NOTHING;
 """
 
 
-async def ensure_columns(pool: asyncpg.Pool) -> None:
-    """Apply user-table column migrations to an already-running database."""
-    await pool.execute(USER_MIGRATIONS_DDL)
-
-
+# USER_MIGRATIONS_DDL is applied at startup by be/migrations.py. ensure_ghost
+# stays a named function because it is a meaningful operation on its own and the
+# device tests drive it directly.
 async def ensure_ghost(pool: asyncpg.Pool) -> None:
     """Guarantee the IT-STORE row exists. See GHOST_DDL."""
     await pool.execute(GHOST_DDL)
@@ -289,6 +287,22 @@ async def search(pool: asyncpg.Pool, q: str) -> list[dict]:
         f"SELECT {COLUMNS} FROM users{where.sql()}", *where.params
     )
     return [dict(r) for r in rows]
+
+
+async def get_many(pool: asyncpg.Pool, codes: list[str]) -> dict[str, dict]:
+    """Users by code in one query, keyed by code; missing codes are absent.
+
+    Mirrors device_repo.get_many, including the decision to include deleted rows:
+    `get` returns them too, and a caller reconciling an import needs to know the
+    code exists at all.
+    """
+    if not codes:
+        return {}
+    rows = await pool.fetch(
+        f"SELECT {COLUMNS} FROM users WHERE employee_code = ANY($1::varchar[])",
+        codes,
+    )
+    return {r["employee_code"]: dict(r) for r in rows}
 
 
 async def list_teams(pool: asyncpg.Pool) -> list[str]:

@@ -32,10 +32,8 @@ CREATE INDEX IF NOT EXISTS idx_search_feedback_query
 """
 
 
-async def ensure_table(pool: asyncpg.Pool) -> None:
-    """Create the table on already-running databases (schema.sql only runs on a
-    fresh volume)."""
-    await pool.execute(FEEDBACK_DDL)
+# FEEDBACK_DDL is applied at startup by be/migrations.py; there is no
+# ensure_table() wrapper any more because nothing but that runner called it.
 
 
 async def create(pool: asyncpg.Pool, fb: FeedbackCreate) -> dict:

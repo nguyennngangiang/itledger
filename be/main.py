@@ -2,11 +2,8 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request, Response, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from . import db
+from . import db, migrations
 from .config import settings
-from .repositories import feedback as feedback_repo
-from .repositories import import_issues as import_issues_repo
-from .repositories import user as user_repo
 from .repositories.errors import (
     DuplicateError,
     ForeignKeyError,
@@ -20,12 +17,9 @@ async def lifespan(app: FastAPI):
     await db.connect()
     # Schema changes are applied here, idempotently, because schema.sql only runs
     # on a fresh volume — the deployed database holds real data and must never be
-    # recreated to pick up a column. Each of these is also mirrored in schema.sql
-    # so a fresh machine gets the same shape.
-    await feedback_repo.ensure_table(db.get_pool())
-    await import_issues_repo.ensure_table(db.get_pool())
-    await user_repo.ensure_columns(db.get_pool())
-    await user_repo.ensure_ghost(db.get_pool())
+    # recreated to pick up a column. Everything in migrations.py is also mirrored
+    # in schema.sql so a fresh machine gets the same shape.
+    await migrations.run(db.get_pool())
     yield
     await db.disconnect()
 

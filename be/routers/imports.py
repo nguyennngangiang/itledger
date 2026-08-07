@@ -551,7 +551,10 @@ async def apply_handover(req: ApplyRequest, pool=Depends(get_pool)):
                     k: v for k, v in (item.device_fields or {}).items()
                     if k in MINUTES_DEVICE_FIELDS and v is not None
                 }
-                current = await device_repo.get(conn, item.serial)
+                # Domain errors from the repos (DuplicateError / ForeignKeyError)
+                # propagate to the 409 handler in main.py; leaving the transaction
+                # is what rolls the whole apply back, same as before.
+                device = current = await device_repo.get(conn, item.serial)
                 if current is None:
                     if not item.create_device:
                         raise HTTPException(
@@ -559,23 +562,25 @@ async def apply_handover(req: ApplyRequest, pool=Depends(get_pool)):
                             f"Thiết bị {item.serial} chưa có trong hệ thống. "
                             "Bật tạo mới hoặc bỏ qua dòng này.",
                         )
-                    try:
-                        await device_repo.create(conn, DeviceCreate(
-                            serial_number=item.serial, status="in_stock",
-                            user_id=GHOST_CODE, **fields,
-                        ))
-                    except (DuplicateError, ForeignKeyError) as e:
-                        raise HTTPException(409, str(e))
+                    device = await device_repo.create(conn, DeviceCreate(
+                        serial_number=item.serial, status="in_stock",
+                        user_id=GHOST_CODE, **fields,
+                    ))
                     result.devices_created += 1
                 elif fields:
-                    await device_repo.update(conn, item.serial, DeviceUpdate(**fields))
+                    device = await device_repo.update(
+                        conn, item.serial, DeviceUpdate(**fields)
+                    )
                     result.devices_updated += 1
 
+                # `device` is the row we just wrote (or `current`, untouched) —
+                # re-reading it here was a wasted round-trip per line item and a
+                # read-your-own-write hazard for no gain.
                 after = handover_import.apply_flow(
                     item.flow,
                     user_code=req.party_b_code if req.it_side == "a" else req.party_a_code,
                     it_code=req.party_a_code if req.it_side == "a" else req.party_b_code,
-                    device=await device_repo.get(conn, item.serial),
+                    device=device,
                 )
                 if item.flow == TRANSFER:
                     after = {
@@ -585,17 +590,14 @@ async def apply_handover(req: ApplyRequest, pool=Depends(get_pool)):
                         "device_status_after": "active",
                     }
 
-                try:
-                    await handover_repo.create(conn, HandoverCreate(
-                        handover_id=item.handover_id or str(uuid.uuid4()),
-                        handover_date=item.handover_date or req.handover_date,
-                        device_id=item.serial,
-                        from_user_id=after["from_user_id"],
-                        to_user_id=after["to_user_id"],
-                        reason=(item.reason or _default_reason(item.flow))[:100],
-                    ))
-                except (DuplicateError, ForeignKeyError) as e:
-                    raise HTTPException(409, str(e))
+                await handover_repo.create(conn, HandoverCreate(
+                    handover_id=item.handover_id or str(uuid.uuid4()),
+                    handover_date=item.handover_date or req.handover_date,
+                    device_id=item.serial,
+                    from_user_id=after["from_user_id"],
+                    to_user_id=after["to_user_id"],
+                    reason=(item.reason or _default_reason(item.flow))[:100],
+                ))
                 result.handovers_created += 1
 
                 await device_repo.update(conn, item.serial, DeviceUpdate(
@@ -646,24 +648,24 @@ async def count_issues(pool=Depends(get_pool)):
     return {"open": await issues_repo.count_open(pool)}
 
 
-async def _still_stands(pool, issue: dict) -> tuple[bool, str | None]:
+async def _still_stands(
+    pool, issue: dict, current: dict | None
+) -> tuple[bool, str | None]:
     """Is this open issue still true of the ledger? Returns (stands, why-not).
 
     The backlog goes stale on its own: someone fills the missing specs from the
     Devices screen, or corrects a team on the person's own row, and the issue that
     asked for exactly that is still sitting there. Rather than trust every editing
     path to remember to close it, the truth is re-derived from the data.
+
+    `current` is the referenced row, fetched in bulk by the caller — see
+    recheck_issues. `pool` is still needed for the one write this can make.
     """
     kind, item_id = issue["kind"], issue.get("item_id")
     payload = issue.get("payload") or {}
     if not item_id:
         return True, None  # nothing to check it against — a human still rules
-
-    if issue["resource"] == "users":
-        current = await user_repo.get(pool, item_id)
-    elif issue["resource"] == "devices":
-        current = await device_repo.get(pool, item_id)
-    else:
+    if issue["resource"] not in ("users", "devices"):
         return True, None  # handover-scoped issues have no single row to re-read
 
     if current is None:
@@ -702,9 +704,27 @@ async def recheck_issues(pool=Depends(get_pool)):
     route — this screen, the Devices editor, a later import — makes the row go
     away, instead of leaving a job that was done days ago at the top of the list.
     """
+    issues = await issues_repo.list_issues(pool, status=issues_repo.OPEN, limit=500)
+
+    # Two queries for the whole backlog rather than one per issue. This used to
+    # re-read the referenced row inside the loop, so a full backlog cost up to
+    # 500 x 3 sequential round-trips in a single request — and the Notifications
+    # screen calls this before every list.
+    rows_by_resource = {
+        "users": await user_repo.get_many(
+            pool, [i["item_id"] for i in issues
+                   if i["resource"] == "users" and i.get("item_id")]
+        ),
+        "devices": await device_repo.get_many(
+            pool, [i["item_id"] for i in issues
+                   if i["resource"] == "devices" and i.get("item_id")]
+        ),
+    }
+
     closed = 0
-    for issue in await issues_repo.list_issues(pool, status=issues_repo.OPEN, limit=500):
-        stands, why = await _still_stands(pool, issue)
+    for issue in issues:
+        current = rows_by_resource.get(issue["resource"], {}).get(issue.get("item_id"))
+        stands, why = await _still_stands(pool, issue, current)
         if stands:
             continue
         # "Gone" is dismissed, not resolved: nobody ruled on it, it stopped applying.

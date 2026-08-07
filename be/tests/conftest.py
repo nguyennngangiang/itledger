@@ -20,11 +20,9 @@ import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 
-from be import db
+from be import db, migrations
 from be.config import settings
 from be.main import app
-from be.repositories import feedback as feedback_repo
-from be.repositories import import_issues as issues_repo
 
 SCHEMA_FILE = Path(__file__).resolve().parent.parent / "sql" / "schema.sql"
 
@@ -88,8 +86,9 @@ async def pool(database: str):
     dependency (routers) and `db._pool` (things that call db.get_pool() directly,
     e.g. /healthz)."""
     p = await asyncpg.create_pool(dsn=database, min_size=1, max_size=4)
-    await feedback_repo.ensure_table(p)
-    await issues_repo.ensure_table(p)
+    # The same call the lifespan makes, so the test database is provisioned
+    # exactly the way production is: fresh schema.sql, then migrations.
+    await migrations.run(p)
     await p.execute(f"TRUNCATE {ALL_TABLES} RESTART IDENTITY CASCADE")
 
     db._pool = p

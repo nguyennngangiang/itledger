@@ -63,10 +63,7 @@ CREATE INDEX IF NOT EXISTS idx_import_issues_open
 """
 
 
-async def ensure_table(pool: asyncpg.Pool) -> None:
-    """Create the table on already-running databases (schema.sql only runs on a
-    fresh volume). Mirrors feedback.ensure_table."""
-    await pool.execute(IMPORT_ISSUES_DDL)
+# IMPORT_ISSUES_DDL is applied at startup by be/migrations.py.
 
 
 def _row(row: asyncpg.Record) -> dict:
