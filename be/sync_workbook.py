@@ -42,6 +42,7 @@ from pathlib import Path
 import asyncpg
 
 from .config import settings
+from .constants import GHOST_CODE as GHOST
 from .fix_user_names import NAME_DECISIONS, classify as classify_names
 from .models.device import DeviceCreate, DeviceUpdate
 from .models.handover import HandoverCreate
@@ -57,8 +58,6 @@ ROOT = Path(__file__).resolve().parent.parent
 DATA_FILE = ROOT / "import_data.json"
 REPORT_FILE = ROOT / "import_names_report.json"
 BACKUP_FILE = ROOT / "workbook_sync_backup.json"
-
-GHOST = "IT-STORE"
 
 # Device columns the workbook owns. `status` is deliberately absent — see docstring.
 DEVICE_FIELDS = (

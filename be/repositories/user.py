@@ -12,15 +12,15 @@ one and nothing here cascades:
 """
 import asyncpg
 
+from ..constants import GHOST_CODE
 from ..models.user import UserCreate, UserUpdate
-from . import distinct_values
+from . import _crud, distinct_values
 from .errors import DuplicateError, ForeignKeyError, InUseError, ProtectedError
 
-COLUMNS = "employee_code, name, team, status"
+# Re-exported: import_employees.py and mark_leavers.py reach for it here.
+__all__ = ["GHOST_CODE"]
 
-# The single ghost account that owns every ownerless / in-stock device.
-# Mirrors GHOST_USER_CODE in fe/src/types.ts and GHOST_CODE in be/seed.py.
-GHOST_CODE = "IT-STORE"
+COLUMNS = "employee_code, name, team, status"
 
 ACTIVE = "active"
 RETIRED = "retired"
@@ -115,6 +115,27 @@ async def list_users(
 
 # Columns allowed in ORDER BY (name is interpolated, so it MUST be allowlisted).
 SORTABLE_FIELDS = frozenset({"employee_code", "name", "team", "status"})
+
+# Only one column here is worth suggesting, but it still goes through the shared
+# helper so teams get the same case-variant collapsing as device brands.
+SUGGESTABLE_FIELDS = frozenset({"team"})
+
+TABLE = _crud.Table(
+    name="users",
+    pk="employee_code",
+    columns=COLUMNS,
+    sortable=SORTABLE_FIELDS,
+    default_sort="employee_code",
+    suggestable=SUGGESTABLE_FIELDS,
+    fk_message=(
+        "{key} still appears in handover history and cannot be permanently "
+        "deleted. Leave them in the trash instead."
+    ),
+    fk_message_many=(
+        "One or more of those employees still appear in handover history and "
+        "cannot be permanently deleted."
+    ),
+)
 
 
 async def list_page(
@@ -231,38 +252,23 @@ async def _guard_removable(pool: asyncpg.Pool, employee_code: str) -> None:
         )
 
 
+# The guards stay here rather than moving into _crud: they are this resource's
+# policy, not shared machinery, and the helper composes underneath them.
 async def delete(pool: asyncpg.Pool, employee_code: str) -> bool:
-    # Soft delete: move to trash (deleted_at set).
+    """Soft delete: move to trash (deleted_at set)."""
     await _guard_removable(pool, employee_code)
-    result = await pool.execute(
-        "UPDATE users SET deleted_at = now() "
-        "WHERE employee_code = $1 AND deleted_at IS NULL",
-        employee_code,
-    )
-    return result != "UPDATE 0"
+    return await _crud.soft_delete(pool, TABLE, employee_code)
 
 
 async def restore(pool: asyncpg.Pool, employee_code: str) -> bool:
-    result = await pool.execute(
-        "UPDATE users SET deleted_at = NULL WHERE employee_code = $1", employee_code
-    )
-    return result != "UPDATE 0"
+    return await _crud.restore(pool, TABLE, employee_code)
 
 
 async def purge(pool: asyncpg.Pool, employee_code: str) -> bool:
-    # Permanent delete (from the trash). Handovers still reference departed
-    # staff, so this can legitimately fail on a FK — report it as such.
+    """Permanent delete (from the trash). Handovers still reference departed
+    staff, so this can legitimately fail on a FK — reported as such."""
     await _guard_removable(pool, employee_code)
-    try:
-        result = await pool.execute(
-            "DELETE FROM users WHERE employee_code = $1", employee_code
-        )
-    except asyncpg.ForeignKeyViolationError as e:
-        raise ForeignKeyError(
-            f"{employee_code} still appears in handover history and cannot be "
-            f"permanently deleted. Leave them in the trash instead."
-        ) from e
-    return result != "DELETE 0"
+    return await _crud.purge(pool, TABLE, employee_code)
 
 
 async def delete_many(
@@ -270,31 +276,13 @@ async def delete_many(
 ) -> int:
     """Bulk delete. Lenient about unknown codes, strict about the guards.
 
-    Unlike the device repo this cannot be a single round-trip: each code has to
-    clear the ghost / still-owns-devices checks, and a caller who selected a
-    protected row deserves to be told rather than have it silently skipped.
+    The guard loop is why this is not a plain delegation: each code has to clear
+    the ghost / still-owns-devices checks, and a caller who selected a protected
+    row deserves to be told rather than have it silently skipped.
     """
-    if not codes:
-        return 0
     for code in codes:
         await _guard_removable(pool, code)
-    if permanent:
-        try:
-            result = await pool.execute(
-                "DELETE FROM users WHERE employee_code = ANY($1::text[])", codes
-            )
-        except asyncpg.ForeignKeyViolationError as e:
-            raise ForeignKeyError(
-                "One or more of those employees still appear in handover history "
-                "and cannot be permanently deleted."
-            ) from e
-    else:
-        result = await pool.execute(
-            "UPDATE users SET deleted_at = now() "
-            "WHERE employee_code = ANY($1::text[]) AND deleted_at IS NULL",
-            codes,
-        )
-    return int(result.split()[-1])
+    return await _crud.delete_many(pool, TABLE, codes, permanent=permanent)
 
 
 async def search(pool: asyncpg.Pool, q: str) -> list[dict]:
@@ -308,11 +296,6 @@ async def search(pool: asyncpg.Pool, q: str) -> list[dict]:
         pattern,
     )
     return [dict(r) for r in rows]
-
-
-# Only one column here is worth suggesting, but go through the shared helper so
-# teams get the same case-variant collapsing as device brands.
-SUGGESTABLE_FIELDS = frozenset({"team"})
 
 
 async def list_teams(pool: asyncpg.Pool) -> list[str]:

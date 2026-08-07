@@ -20,6 +20,7 @@ from decimal import Decimal
 import asyncpg
 
 from .config import settings
+from .constants import GHOST_CODE
 
 N_USERS = 25
 N_DEVICES = 100
@@ -33,10 +34,6 @@ TEAMS = [
     "ESG", "DMD", "PMD", "FMD", "PROJECT", "MKT", "HR", "ACC",
     "FIN", "ADMIN", "IT", "S&P", "QA/QC", "KRDESK", "OPD",
 ]
-
-# Single "ghost" account in the IT team that holds every ownerless device,
-# so a device always resolves to an owner name/team and "in stock" is meaningful.
-GHOST_CODE = "IT-STORE"
 
 SURNAMES = ["Nguyen", "Tran", "Le", "Pham", "Hoang", "Vu", "Dang",
             "Bui", "Do", "Ho", "Ngo", "Duong", "Ly", "Phan", "Vo"]

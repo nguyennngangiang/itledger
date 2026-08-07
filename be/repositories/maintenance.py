@@ -5,7 +5,7 @@ asyncpg uses $1, $2 ... placeholders — never string-format user values into SQ
 import asyncpg
 
 from ..models.maintenance import MaintenanceCreate, MaintenanceUpdate
-from . import device_owner_match
+from . import _crud, device_owner_match
 from .errors import DuplicateError, ForeignKeyError
 
 COLUMNS = (
@@ -125,6 +125,16 @@ SORTABLE_FIELDS = frozenset({
 # These are the free-text fields the team keeps re-typing the same phrases into.
 SUGGESTABLE_FIELDS = frozenset({"part", "result", "solution", "reason", "team"})
 
+# Nothing references maintenance, so a purge here has no foreign key to trip.
+TABLE = _crud.Table(
+    name="maintenance",
+    pk="maintenance_id",
+    columns=COLUMNS,
+    sortable=SORTABLE_FIELDS,
+    default_sort="maintenance_date",
+    suggestable=SUGGESTABLE_FIELDS,
+)
+
 
 async def list_page(
     pool: asyncpg.Pool,
@@ -214,27 +224,15 @@ async def update(
 
 
 async def delete(pool: asyncpg.Pool, maintenance_id: str) -> bool:
-    result = await pool.execute(
-        "UPDATE maintenance SET deleted_at = now() "
-        "WHERE maintenance_id = $1 AND deleted_at IS NULL",
-        maintenance_id,
-    )
-    return result != "UPDATE 0"
+    return await _crud.soft_delete(pool, TABLE, maintenance_id)
 
 
 async def restore(pool: asyncpg.Pool, maintenance_id: str) -> bool:
-    result = await pool.execute(
-        "UPDATE maintenance SET deleted_at = NULL WHERE maintenance_id = $1",
-        maintenance_id,
-    )
-    return result != "UPDATE 0"
+    return await _crud.restore(pool, TABLE, maintenance_id)
 
 
 async def purge(pool: asyncpg.Pool, maintenance_id: str) -> bool:
-    result = await pool.execute(
-        "DELETE FROM maintenance WHERE maintenance_id = $1", maintenance_id
-    )
-    return result != "DELETE 0"
+    return await _crud.purge(pool, TABLE, maintenance_id)
 
 
 async def counts_by_device(pool: asyncpg.Pool) -> dict[str, int]:
@@ -251,18 +249,4 @@ async def counts_by_device(pool: asyncpg.Pool) -> dict[str, int]:
 async def delete_many(
     pool: asyncpg.Pool, ids: list[str], *, permanent: bool = False
 ) -> int:
-    """Bulk delete. Soft-deletes (or purges) every id in one round-trip.
-    Lenient: unknown ids are skipped. Returns rows affected."""
-    if not ids:
-        return 0
-    if permanent:
-        result = await pool.execute(
-            "DELETE FROM maintenance WHERE maintenance_id = ANY($1::text[])", ids
-        )
-    else:
-        result = await pool.execute(
-            "UPDATE maintenance SET deleted_at = now() "
-            "WHERE maintenance_id = ANY($1::text[]) AND deleted_at IS NULL",
-            ids,
-        )
-    return int(result.split()[-1])
+    return await _crud.delete_many(pool, TABLE, ids, permanent=permanent)

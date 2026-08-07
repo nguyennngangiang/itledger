@@ -5,9 +5,16 @@ asyncpg uses $1, $2 ... placeholders — never string-format user values into SQ
 """
 import asyncpg
 
+from ..constants import GHOST_CODE, IT_HELD_STATUSES
 from ..models.device import DeviceCreate, DeviceUpdate
-from . import owner_match
+from . import _crud, owner_match
 from .errors import DuplicateError, ForeignKeyError
+
+# --- identifiers -----------------------------------------------------------
+# Every column name below is interpolated into SQL somewhere, so all three
+# allowlists live together: this block IS the injection boundary for this
+# resource, and it is easier to audit in one place than scattered beside the
+# functions that consume it. _crud.Table re-validates each name at import.
 
 # Shared column list so SELECT / RETURNING always match the DeviceOut shape.
 COLUMNS = (
@@ -15,14 +22,43 @@ COLUMNS = (
     "os, msoffice, buy_date, name, user_id, status"
 )
 
-# The ghost account that holds anything nobody is using. Mirrors GHOST_CODE in
-# repositories/user.py and GHOST_USER_CODE in fe/src/types.ts.
-GHOST_CODE = "IT-STORE"
-# Statuses that mean IT is physically holding the machine, so no person can be
-# its owner. The active/in_stock pair is only auto-filled in the UI and stays
-# editable; THIS one is a rule, enforced here so an import or a direct API call
-# cannot leave a device under repair sitting on someone's name.
-IT_HELD_STATUSES = frozenset({"maintaining", "on_del"})
+# Columns allowed in ORDER BY.
+SORTABLE_FIELDS = frozenset({
+    "serial_number", "name", "brand", "type", "cpu", "ram", "storage",
+    "os", "msoffice", "buy_date", "user_id", "status",
+})
+
+FILTERABLE_FIELDS = frozenset({
+    "type", "brand", "cpu", "ram", "storage", "os", "msoffice", "user_id", "status"
+})
+
+# Columns offered as form autocomplete (see repositories.distinct_values).
+# Deliberately not FILTERABLE_FIELDS: `name` is worth suggesting but filtering
+# on an exact device name is useless, and suggesting user_id/status makes no
+# sense when both already have proper pickers.
+SUGGESTABLE_FIELDS = frozenset({
+    "type", "brand", "cpu", "ram", "storage", "os", "msoffice", "name"
+})
+
+TABLE = _crud.Table(
+    name="devices",
+    pk="serial_number",
+    columns=COLUMNS,
+    sortable=SORTABLE_FIELDS,
+    default_sort="serial_number",
+    suggestable=SUGGESTABLE_FIELDS,
+    # Handovers and maintenance both FK here and nothing cascades, so a device
+    # with history cannot be purged. That is most of the fleet — accumulating
+    # that history is the point of the app — so it has to read as a refusal.
+    fk_message=(
+        "{key} still appears in handover or repair history and cannot be "
+        "permanently deleted. Leave it in the trash instead."
+    ),
+    fk_message_many=(
+        "One or more of those devices still appear in handover or repair "
+        "history and cannot be permanently deleted."
+    ),
+)
 
 
 def owner_for_status(status: str | None, user_id: str | None) -> str | None:
@@ -83,13 +119,6 @@ async def list_devices(pool: asyncpg.Pool, user_id: str | None = None) -> list[d
             f"ORDER BY serial_number"
         )
     return [dict(r) for r in rows]
-
-
-# Columns allowed in ORDER BY (name is interpolated, so it MUST be allowlisted).
-SORTABLE_FIELDS = frozenset({
-    "serial_number", "name", "brand", "type", "cpu", "ram", "storage",
-    "os", "msoffice", "buy_date", "user_id", "status",
-})
 
 
 async def list_page(
@@ -196,74 +225,23 @@ async def update(
 
 
 async def delete(pool: asyncpg.Pool, serial_number: str) -> bool:
-    # Soft delete: move to trash (deleted_at set).
-    result = await pool.execute(
-        "UPDATE devices SET deleted_at = now() "
-        "WHERE serial_number = $1 AND deleted_at IS NULL",
-        serial_number,
-    )
-    return result != "UPDATE 0"
+    """Soft delete: move to trash (deleted_at set)."""
+    return await _crud.soft_delete(pool, TABLE, serial_number)
 
 
 async def restore(pool: asyncpg.Pool, serial_number: str) -> bool:
-    result = await pool.execute(
-        "UPDATE devices SET deleted_at = NULL WHERE serial_number = $1", serial_number
-    )
-    return result != "UPDATE 0"
-
-
-# Handovers and maintenance rows both FK to devices.serial_number and nothing
-# cascades, so purging a device that has any history is a constraint violation.
-# That is most of the fleet — the ledger exists to accumulate exactly that
-# history — so this is the normal case, not the edge case, and it has to read as
-# a refusal rather than a crash.
-_PURGE_BLOCKED = (
-    "{key} still appears in handover or repair history and cannot be "
-    "permanently deleted. Leave it in the trash instead."
-)
+    return await _crud.restore(pool, TABLE, serial_number)
 
 
 async def purge(pool: asyncpg.Pool, serial_number: str) -> bool:
-    # Permanent delete (from the trash).
-    try:
-        result = await pool.execute(
-            "DELETE FROM devices WHERE serial_number = $1", serial_number
-        )
-    except asyncpg.ForeignKeyViolationError as e:
-        raise ForeignKeyError(_PURGE_BLOCKED.format(key=serial_number)) from e
-    return result != "DELETE 0"
+    """Permanent delete (from the trash). 409s if the device has history."""
+    return await _crud.purge(pool, TABLE, serial_number)
 
 
 async def delete_many(
     pool: asyncpg.Pool, serials: list[str], *, permanent: bool = False
 ) -> int:
-    """Bulk delete. Soft-deletes (or purges) every serial in one round-trip.
-
-    Lenient: unknown/already-gone serials are simply skipped. Returns the
-    number of rows actually affected.
-    """
-    if not serials:
-        return 0
-    if permanent:
-        try:
-            result = await pool.execute(
-                "DELETE FROM devices WHERE serial_number = ANY($1::text[])", serials
-            )
-        except asyncpg.ForeignKeyViolationError as e:
-            # One statement, so the whole batch is refused rather than partly
-            # applied. Which serial tripped it is not worth a second query —
-            # the fix is the same for all of them.
-            raise ForeignKeyError(
-                "One or more of those devices still appear in handover or repair "
-                "history and cannot be permanently deleted."
-            ) from e
-    else:
-        result = await pool.execute(
-            "UPDATE devices SET deleted_at = now() "
-            "WHERE serial_number = ANY($1::text[]) AND deleted_at IS NULL",
-            serials,
-        )
-    return int(result.split()[-1])
+    return await _crud.delete_many(pool, TABLE, serials, permanent=permanent)
 
 
 async def import_devices(pool: asyncpg.Pool, devices: list[DeviceCreate]) -> dict:
@@ -307,19 +285,6 @@ async def search(pool: asyncpg.Pool, q: str) -> list[dict]:
         f"%{q}%",
     )
     return [dict(r) for r in rows]
-
-FILTERABLE_FIELDS = frozenset({
-    "type", "brand", "cpu", "ram", "storage", "os", "msoffice", "user_id", "status"
-})
-
-# Columns offered as form autocomplete (see repositories.distinct_values).
-# Deliberately not FILTERABLE_FIELDS: `name` is worth suggesting but filtering
-# on an exact device name is useless, and suggesting user_id/status makes no
-# sense when both already have proper pickers.
-SUGGESTABLE_FIELDS = frozenset({
-    "type", "brand", "cpu", "ram", "storage", "os", "msoffice", "name"
-})
-
 
 async def filter_devices(pool: asyncpg.Pool, field: str, value: str) -> list[dict]:
     """Filter devices by a single column. Column name is allowlisted — not user SQL."""

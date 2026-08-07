@@ -22,11 +22,9 @@ here rather than a model's judgement call.
 import unicodedata
 from datetime import date
 
-GHOST_CODE = "IT-STORE"
-
-# Statuses that mean IT is physically holding the machine — a handover must not
-# clear them (mirrors deriveStatus in fe/src/lib/format.ts).
-IT_HELD_STATUSES = frozenset({"maintaining", "on_del"})
+# be.constants imports nothing, so this module stays database-free — which is
+# what lets most of its tests be plain synchronous unit tests.
+from .constants import GHOST_CODE, IT_HELD_STATUSES
 
 RETURN = "return"    # người dùng trả máy về IT
 ISSUE = "issue"      # IT bàn giao máy cho người dùng

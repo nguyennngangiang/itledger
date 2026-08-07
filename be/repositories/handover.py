@@ -4,16 +4,14 @@ asyncpg uses $1, $2 ... placeholders — never string-format user values into SQ
 """
 import asyncpg
 
+from ..constants import GHOST_CODE
 from ..models.handover import HandoverCreate, HandoverUpdate
-from . import owner_match
+from . import _crud, owner_match
 from .errors import DuplicateError, ForeignKeyError
 
 COLUMNS = (
     "handover_id, handover_date, device_id, from_user_id, to_user_id, reason"
 )
-
-# The store account. Imported rather than hardcoded twice — see handover_import.
-GHOST_CODE = "IT-STORE"
 
 # Tie-break for two handovers of the same device on the same DATE.
 #
@@ -149,6 +147,17 @@ SORTABLE_FIELDS = frozenset({
 # `reason` is free text here — the rest are ids picked from a list.
 SUGGESTABLE_FIELDS = frozenset({"reason"})
 
+# Nothing references handovers, so a purge here has no foreign key to trip and
+# the default fk_message never fires.
+TABLE = _crud.Table(
+    name="handovers",
+    pk="handover_id",
+    columns=COLUMNS,
+    sortable=SORTABLE_FIELDS,
+    default_sort="handover_date",
+    suggestable=SUGGESTABLE_FIELDS,
+)
+
 
 async def list_page(
     pool: asyncpg.Pool,
@@ -225,43 +234,18 @@ async def update(
 
 
 async def delete(pool: asyncpg.Pool, handover_id: str) -> bool:
-    result = await pool.execute(
-        "UPDATE handovers SET deleted_at = now() "
-        "WHERE handover_id = $1 AND deleted_at IS NULL",
-        handover_id,
-    )
-    return result != "UPDATE 0"
+    return await _crud.soft_delete(pool, TABLE, handover_id)
 
 
 async def restore(pool: asyncpg.Pool, handover_id: str) -> bool:
-    result = await pool.execute(
-        "UPDATE handovers SET deleted_at = NULL WHERE handover_id = $1", handover_id
-    )
-    return result != "UPDATE 0"
+    return await _crud.restore(pool, TABLE, handover_id)
 
 
 async def purge(pool: asyncpg.Pool, handover_id: str) -> bool:
-    result = await pool.execute(
-        "DELETE FROM handovers WHERE handover_id = $1", handover_id
-    )
-    return result != "DELETE 0"
+    return await _crud.purge(pool, TABLE, handover_id)
 
 
 async def delete_many(
     pool: asyncpg.Pool, ids: list[str], *, permanent: bool = False
 ) -> int:
-    """Bulk delete. Soft-deletes (or purges) every id in one round-trip.
-    Lenient: unknown ids are skipped. Returns rows affected."""
-    if not ids:
-        return 0
-    if permanent:
-        result = await pool.execute(
-            "DELETE FROM handovers WHERE handover_id = ANY($1::text[])", ids
-        )
-    else:
-        result = await pool.execute(
-            "UPDATE handovers SET deleted_at = now() "
-            "WHERE handover_id = ANY($1::text[]) AND deleted_at IS NULL",
-            ids,
-        )
-    return int(result.split()[-1])
+    return await _crud.delete_many(pool, TABLE, ids, permanent=permanent)
