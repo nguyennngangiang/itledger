@@ -40,9 +40,26 @@ ALTER TABLE users DROP COLUMN IF EXISTS position;
 """
 
 
+# The ghost is not optional infrastructure — owner_for_status() writes IT-STORE
+# into devices.user_id for anything under repair, so a database without this row
+# rejects those writes on the FK. It used to be created only by be/seed.py, which
+# means a fresh volume that was never seeded had a device API that failed on any
+# maintaining/on_del status. Idempotent, so it is safe on every boot.
+GHOST_DDL = """
+INSERT INTO users (employee_code, name, team)
+VALUES ('IT-STORE', 'IT Store', 'IT')
+ON CONFLICT (employee_code) DO NOTHING;
+"""
+
+
 async def ensure_columns(pool: asyncpg.Pool) -> None:
     """Apply user-table column migrations to an already-running database."""
     await pool.execute(USER_MIGRATIONS_DDL)
+
+
+async def ensure_ghost(pool: asyncpg.Pool) -> None:
+    """Guarantee the IT-STORE row exists. See GHOST_DDL."""
+    await pool.execute(GHOST_DDL)
 
 
 async def create_batch(pool: asyncpg.Pool, users: list[UserCreate]) -> list[dict]:

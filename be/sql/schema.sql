@@ -14,6 +14,16 @@ CREATE TABLE users (
     deleted_at TIMESTAMP
 );
 
+-- The ghost account that owns everything nobody is using. Structural, not sample
+-- data: owner_for_status() (be/repositories/device.py) writes this code into
+-- devices.user_id for any maintaining/on_del device, so without the row those
+-- writes fail the FK. It used to be created only by be/seed.py, which left an
+-- unseeded volume with a device API that rejected those statuses. Also applied
+-- at startup for already-running databases (be/repositories/user.py GHOST_DDL).
+INSERT INTO users (employee_code, name, team)
+VALUES ('IT-STORE', 'IT Store', 'IT')
+ON CONFLICT (employee_code) DO NOTHING;
+
 CREATE TABLE devices (
     serial_number VARCHAR(100) PRIMARY KEY,
     barcode VARCHAR(100) UNIQUE,

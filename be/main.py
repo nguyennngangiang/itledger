@@ -1,11 +1,18 @@
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, Response, status
+from fastapi import FastAPI, Request, Response, status
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from . import db
 from .config import settings
 from .repositories import feedback as feedback_repo
 from .repositories import import_issues as import_issues_repo
 from .repositories import user as user_repo
+from .repositories.errors import (
+    DuplicateError,
+    ForeignKeyError,
+    InUseError,
+    ProtectedError,
+)
 from .routers import assistant, devices, feedback, handovers, imports, maintenance, users
 
 @asynccontextmanager
@@ -18,6 +25,7 @@ async def lifespan(app: FastAPI):
     await feedback_repo.ensure_table(db.get_pool())
     await import_issues_repo.ensure_table(db.get_pool())
     await user_repo.ensure_columns(db.get_pool())
+    await user_repo.ensure_ghost(db.get_pool())
     yield
     await db.disconnect()
 
@@ -30,6 +38,26 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+async def _conflict(request: Request, exc: Exception) -> JSONResponse:
+    """Every domain refusal is a 409 carrying the repository's own message.
+
+    DuplicateError  a unique constraint (serial, barcode, employee code)
+    ForeignKeyError a referenced row is missing, or still references this one
+    InUseError      refused up front (an employee who still holds devices)
+    ProtectedError  a structural row (the IT-STORE ghost)
+
+    Registered centrally so a router that forgets to catch one returns 409
+    rather than 500 — which is how permanently deleting a device with history
+    used to crash. Deliberately NOT extended to ValueError: Pydantic and half
+    the standard library raise that, and blanket-mapping it to 4xx would turn
+    real bugs into silent client errors. Those stay caught locally.
+    """
+    return JSONResponse(status_code=409, content={"detail": str(exc)})
+
+
+for _domain_error in (DuplicateError, ForeignKeyError, InUseError, ProtectedError):
+    app.add_exception_handler(_domain_error, _conflict)
 
 app.include_router(devices.router)
 app.include_router(handovers.router)

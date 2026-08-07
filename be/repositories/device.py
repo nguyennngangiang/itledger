@@ -62,7 +62,10 @@ async def create(pool: asyncpg.Pool, device: DeviceCreate) -> dict:
     except asyncpg.UniqueViolationError as e:
         raise DuplicateError(f"Device already exists: {device.serial_number}") from e
     except asyncpg.ForeignKeyViolationError as e:
-        raise ForeignKeyError(f"Unknown user_id: {device.user_id}") from e
+        # `owner`, not device.user_id: for an IT-held status owner_for_status
+        # substitutes the ghost, so a caller who sent no owner at all would
+        # otherwise be told "Unknown user_id: None" about a code they never sent.
+        raise ForeignKeyError(f"Unknown user_id: {owner}") from e
     return dict(row)
 
 
@@ -209,11 +212,25 @@ async def restore(pool: asyncpg.Pool, serial_number: str) -> bool:
     return result != "UPDATE 0"
 
 
+# Handovers and maintenance rows both FK to devices.serial_number and nothing
+# cascades, so purging a device that has any history is a constraint violation.
+# That is most of the fleet — the ledger exists to accumulate exactly that
+# history — so this is the normal case, not the edge case, and it has to read as
+# a refusal rather than a crash.
+_PURGE_BLOCKED = (
+    "{key} still appears in handover or repair history and cannot be "
+    "permanently deleted. Leave it in the trash instead."
+)
+
+
 async def purge(pool: asyncpg.Pool, serial_number: str) -> bool:
     # Permanent delete (from the trash).
-    result = await pool.execute(
-        "DELETE FROM devices WHERE serial_number = $1", serial_number
-    )
+    try:
+        result = await pool.execute(
+            "DELETE FROM devices WHERE serial_number = $1", serial_number
+        )
+    except asyncpg.ForeignKeyViolationError as e:
+        raise ForeignKeyError(_PURGE_BLOCKED.format(key=serial_number)) from e
     return result != "DELETE 0"
 
 
@@ -228,9 +245,18 @@ async def delete_many(
     if not serials:
         return 0
     if permanent:
-        result = await pool.execute(
-            "DELETE FROM devices WHERE serial_number = ANY($1::text[])", serials
-        )
+        try:
+            result = await pool.execute(
+                "DELETE FROM devices WHERE serial_number = ANY($1::text[])", serials
+            )
+        except asyncpg.ForeignKeyViolationError as e:
+            # One statement, so the whole batch is refused rather than partly
+            # applied. Which serial tripped it is not worth a second query —
+            # the fix is the same for all of them.
+            raise ForeignKeyError(
+                "One or more of those devices still appear in handover or repair "
+                "history and cannot be permanently deleted."
+            ) from e
     else:
         result = await pool.execute(
             "UPDATE devices SET deleted_at = now() "

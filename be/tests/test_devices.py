@@ -217,3 +217,94 @@ async def test_filter_rejects_columns_outside_the_allowlist(client, seed):
     assert bad.status_code == 400, bad.text
     assert "deleted_at" in bad.json()["detail"]
     assert (await client.get("/devices/page")).json()["total"] == 3  # table intact
+
+
+class TestPurgingADeviceWithHistory:
+    """Handovers and maintenance FK to devices and nothing cascades.
+
+    Most of the real fleet has history, so this is the common path, not an edge
+    case. It used to reach the client as an unhandled 500 because the bare
+    DELETE in the repo caught nothing.
+    """
+
+    async def test_single_purge_is_refused_with_409(self, client, seed, pool):
+        await pool.execute(
+            "INSERT INTO handovers (handover_id, device_id, to_user_id) "
+            "VALUES ('HO-1', 'SN-QUAN-1', 'VPHN258')"
+        )
+        r = await client.request(
+            "DELETE", "/devices", json={"serial_number": "SN-QUAN-1"},
+            params={"permanent": "true"},
+        )
+        assert r.status_code == 409, r.text
+        assert "SN-QUAN-1" in r.json()["detail"]
+        # refused, not half-applied
+        assert (await client.get("/devices/SN-QUAN-1")).status_code == 200
+
+    async def test_maintenance_history_blocks_it_too(self, client, seed, pool):
+        await pool.execute(
+            "INSERT INTO maintenance (maintenance_id, device_id, part) "
+            "VALUES ('MT-1', 'SN-QUAN-1', 'Screen')"
+        )
+        r = await client.request(
+            "DELETE", "/devices", json={"serial_number": "SN-QUAN-1"},
+            params={"permanent": "true"},
+        )
+        assert r.status_code == 409, r.text
+
+    async def test_batch_purge_refuses_the_whole_batch(self, client, seed, pool):
+        await pool.execute(
+            "INSERT INTO handovers (handover_id, device_id, to_user_id) "
+            "VALUES ('HO-1', 'SN-QUAN-1', 'VPHN258')"
+        )
+        r = await client.request(
+            "DELETE", "/devices/batch", json=["SN-QUAN-1", "SN-GIANG-1"],
+            params={"permanent": "true"},
+        )
+        assert r.status_code == 409, r.text
+        # One statement, so the clean device survives with the blocked one.
+        assert (await client.get("/devices/page")).json()["total"] == 3
+
+    async def test_a_device_without_history_still_purges(self, client, seed):
+        r = await client.request(
+            "DELETE", "/devices", json={"serial_number": "SN-GIANG-1"},
+            params={"permanent": "true"},
+        )
+        assert r.status_code == 204, r.text
+        assert (await client.get("/devices/SN-GIANG-1")).status_code == 404
+
+
+class TestTheGhostIsBootstrapped:
+    """owner_for_status() writes IT-STORE, so the row has to exist.
+
+    The `seed` fixture supplies it, so these two drive an unseeded pool — the
+    shape a fresh volume has before anyone runs be.seed.
+    """
+
+    async def test_ensure_ghost_lets_a_maintaining_device_be_created(self, client, pool):
+        from be.repositories import user as user_repo
+
+        await user_repo.ensure_ghost(pool)
+        r = await client.post(
+            "/devices", json={"serial_number": "SN-FRESH", "status": "maintaining"}
+        )
+        assert r.status_code == 201, r.text
+        assert r.json()["user_id"] == GHOST
+
+    async def test_ensure_ghost_is_idempotent(self, client, pool):
+        from be.repositories import user as user_repo
+
+        await user_repo.ensure_ghost(pool)
+        await user_repo.ensure_ghost(pool)
+        assert await pool.fetchval("SELECT count(*) FROM users") == 1
+
+    async def test_without_the_ghost_the_error_names_the_code_it_tried(
+        self, client, pool
+    ):
+        # The caller sent no user_id at all; saying "Unknown user_id: None" would
+        # describe a value they never supplied instead of the ghost we substituted.
+        r = await client.post(
+            "/devices", json={"serial_number": "SN-FRESH", "status": "maintaining"}
+        )
+        assert r.status_code == 409, r.text
+        assert GHOST in r.json()["detail"]
