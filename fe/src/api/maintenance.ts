@@ -1,4 +1,4 @@
-import { request } from './client'
+import { deleteBatch, request } from './client'
 import type { Maintenance, MaintenanceCreate } from '../types'
 import { pageQuery } from './paging'
 import type { Paged, PageParams } from './paging'
@@ -15,10 +15,6 @@ export function listMaintenance(deviceId?: string, team?: string) {
 
 export function pageMaintenance(params: PageParams) {
   return request<Paged<Maintenance>>(`/maintenance/page?${pageQuery(params)}`)
-}
-
-export function searchMaintenance(q: string) {
-  return request<Maintenance[]>(`/maintenance/search?q=${encodeURIComponent(q)}`)
 }
 
 // Bulk import parsed repair rows. Re-importing the same file is idempotent, and
@@ -72,8 +68,5 @@ export function deleteMaintenance(maintenanceId: string, permanent = false) {
 
 // Bulk delete by id (soft-delete, or purge when permanent).
 export function deleteMaintenanceBatch(ids: string[], permanent = false) {
-  return request<void>(`/maintenance/batch${permanent ? '?permanent=true' : ''}`, {
-    method: 'DELETE',
-    body: JSON.stringify(ids),
-  })
+  return deleteBatch('maintenance', ids, permanent)
 }

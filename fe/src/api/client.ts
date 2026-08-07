@@ -51,3 +51,18 @@ export async function request<T>(path: string, options: RequestInit = {}): Promi
   if (res.status === 204) return undefined as T
   return res.json() as Promise<T>
 }
+
+/**
+ * DELETE /<resource>/batch. Every resource had a byte-identical copy of this,
+ * differing only in the path segment and what it called the id list.
+ *
+ * The named per-resource wrappers stay — they are what the screens import, they
+ * carry the right parameter name, and each file is where that resource's notes
+ * live. This only removes the repeated body.
+ */
+export function deleteBatch(resource: string, ids: string[], permanent = false) {
+  return request<void>(`/${resource}/batch${permanent ? '?permanent=true' : ''}`, {
+    method: 'DELETE',
+    body: JSON.stringify(ids),
+  })
+}

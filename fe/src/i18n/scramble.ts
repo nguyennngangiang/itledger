@@ -456,6 +456,14 @@ export const SCRAMBLE: Partial<Record<Key, [Lang, string]>> = {
   "detail.close": ["fr", "Fermer"],
   "detail.unknownDevice": ["fr", "Appareil inconnu"],
   "detail.bought": ["fr", "{serial} · acheté le {date}"],
+  "detail.empty.maintenance": [
+    "fr",
+    "Sélectionnez une réparation pour lire son histoire — panne, correctif, résultat, et les autres réparations de cet appareil.",
+  ],
+  "detail.empty.handover": [
+    "fr",
+    "Sélectionnez une remise pour retracer toute la chaîne de possession de l'appareil.",
+  ],
   "journey.title": ["fr", "Parcours de l'appareil"],
   "journey.count": ["fr", "{n} remises"],
   "journey.empty": ["fr", "Aucun historique de remise pour cet appareil."],

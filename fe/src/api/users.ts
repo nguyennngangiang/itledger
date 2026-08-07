@@ -1,4 +1,4 @@
-import { request } from './client'
+import { deleteBatch, request } from './client'
 import type { User, UserCreate, UserCreateBatch } from '../types'
 import { pageQuery } from './paging'
 import type { Paged, PageParams } from './paging'
@@ -33,10 +33,6 @@ export function listUserTeams() {
 
 export function getUser(employeeCode: string) {
   return request<User>(`/users/${encodeURIComponent(employeeCode)}`)
-}
-
-export function searchUser(q: string) {
-  return request<User[]>(`/users/search?q=${encodeURIComponent(q)}`)
 }
 
 export function createUser(user: UserCreate) {
@@ -80,8 +76,5 @@ export function deleteUser(employeeCode: string, permanent = false) {
 
 // Bulk delete by employee code (soft-delete, or purge when permanent).
 export function deleteUsersBatch(codes: string[], permanent = false) {
-  return request<void>(`/users/batch${permanent ? '?permanent=true' : ''}`, {
-    method: 'DELETE',
-    body: JSON.stringify(codes),
-  })
+  return deleteBatch('users', codes, permanent)
 }

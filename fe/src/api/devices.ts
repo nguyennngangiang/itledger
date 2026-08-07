@@ -1,6 +1,6 @@
 // Device API calls — one function per endpoint. Components import these
 // instead of calling fetch() directly. Template to clone for users.ts etc.
-import { request } from './client'
+import { deleteBatch, request } from './client'
 import type { Device, DeviceCreate } from '../types'
 import { pageQuery } from './paging'
 import type { Paged, PageParams } from './paging'
@@ -19,9 +19,10 @@ export function pageDevices(params: PageParams) {
   return request<Paged<Device>>(`/devices/page?${pageQuery(params)}`)
 }
 
-export function searchDevices(q: string) {
-  return request<Device[]>(`/devices/search?q=${encodeURIComponent(q)}`)
-}
+// No searchDevices() wrapper: GET /devices/search still exists and the
+// assistant's find_devices tool calls it server-side, but nothing on the
+// frontend does — the screens filter through usePagedList's `q` instead.
+// (noUnusedLocals does not flag an unused *export*, so this needed a grep.)
 
 // { column -> values already in use }, for the device form's autocompletes.
 // Case variants ("Asus"/"ASUS") are collapsed server-side to the common one.
@@ -64,10 +65,7 @@ export function deleteDevice(serialNumber: string, permanent = false) {
 
 // Bulk delete by serial number (soft-delete, or purge when permanent).
 export function deleteDevicesBatch(serials: string[], permanent = false) {
-  return request<void>(`/devices/batch${permanent ? '?permanent=true' : ''}`, {
-    method: 'DELETE',
-    body: JSON.stringify(serials),
-  })
+  return deleteBatch('devices', serials, permanent)
 }
 
 export type ImportResult = { inserted: number; skipped: number; total: number }

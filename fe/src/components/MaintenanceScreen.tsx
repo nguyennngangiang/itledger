@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Table, Button, Input, Popover } from "antd";
+import { Table, Button, Popover } from "antd";
 import type { TableColumnsType } from "antd";
 import { toast } from "react-toastify";
 import {
@@ -13,12 +13,14 @@ import { listDevices } from "../api/devices";
 import { listUsersIncludingDeleted } from "../api/users";
 import type { Maintenance, Device, User } from "../types";
 import { ConfirmModal } from "./Modal/ConfirmModal";
-import { BulkDeleteBar } from "./BulkDeleteBar";
+import { PanelHead } from "./PanelHead";
+import { SearchBox } from "./SearchBox";
 import { TrashToggle } from "./TrashToggle";
 import MaintenanceModal from "./Modal/MaintenanceModal";
-import { PlusIcon, RefreshIcon, SearchIcon, InfoIcon, TrashIcon, EditIcon } from "./icons";
+import { PlusIcon, RefreshIcon, InfoIcon, TrashIcon, EditIcon } from "./icons";
 import { formatDate, resolveOwner, toUserMap } from "../lib/format";
 import { usePagedList } from "../lib/usePagedList";
+import { useTableSelection } from "../lib/useTableSelection";
 import { TABLE_SCROLL } from "../lib/table";
 import { RepairStoryPanel } from "./RepairStoryPanel";
 import { useT } from "../i18n/useT";
@@ -33,10 +35,8 @@ export const MaintenanceScreen = ({
   const { t } = useT();
   const [devices, setDevices] = useState<Record<string, Device>>({});
   const [users, setUsers] = useState<Record<string, User>>({});
-  const [searchText, setSearchText] = useState("");
   const [deleteTarget, setDeleteTarget] = useState<Maintenance | null>(null);
   const [editTarget, setEditTarget] = useState<Maintenance | null>(null);
-  const [selectedKeys, setSelectedKeys] = useState<string[]>([]);
   const [bulkConfirm, setBulkConfirm] = useState(false);
   const [selected, setSelected] = useState<Maintenance | null>(null);
   const [deviceHistory, setDeviceHistory] = useState<Maintenance[]>([]);
@@ -46,8 +46,8 @@ export const MaintenanceScreen = ({
     defaultOrder: "desc",
     refreshKey,
   });
-
-  useEffect(() => setSelectedKeys([]), [list.trashed]);
+  const { selectedKeys, setSelectedKeys, clear, rowSelection } =
+    useTableSelection(list.trashed);
 
   // Selecting a repair loads that device's full history for the story panel.
   useEffect(() => {
@@ -73,9 +73,9 @@ export const MaintenanceScreen = ({
     try {
       await deleteMaintenanceBatch(selectedKeys, list.trashed);
       toast.success(
-        `${selectedKeys.length} record(s) ${
-          list.trashed ? "permanently deleted" : "moved to trash"
-        }`,
+        t(list.trashed ? "row.bulk.deleted" : "row.bulk.trashed", {
+          n: selectedKeys.length,
+        }),
       );
       setSelectedKeys([]);
     } catch (e) {
@@ -255,20 +255,7 @@ export const MaintenanceScreen = ({
   return (
     <>
       <div className="screen-toolbar">
-        <div className="screen-search">
-          <Input
-            allowClear
-            prefix={<SearchIcon size={16} />}
-            placeholder={t("search.maintenance")}
-            style={{ width: 320 }}
-            value={searchText}
-            onChange={(e) => {
-              setSearchText(e.target.value);
-              list.search(e.target.value.trim());
-            }}
-            onPressEnter={() => list.searchNow(searchText.trim())}
-          />
-        </div>
+        <SearchBox placeholder={t("search.maintenance")} {...list.searchProps} />
         <div className="toolbar-actions">
           <TrashToggle trashed={list.trashed} onToggle={list.toggleTrash} />
           <Button icon={<RefreshIcon size={16} />} onClick={list.reload}>
@@ -282,30 +269,20 @@ export const MaintenanceScreen = ({
 
       <div className="split-view">
         <div className="panel table-panel">
-          <div className="panel-head">
-            <span className="panel-title">
-              {t(list.trashed ? "panel.trash" : "maint.panel")}
-            </span>
-            {selectedKeys.length > 0 ? (
-              <BulkDeleteBar
-                count={selectedKeys.length}
-                trashed={list.trashed}
-                onDelete={() => setBulkConfirm(true)}
-                onClear={() => setSelectedKeys([])}
-              />
-            ) : (
-              <span className="panel-count">{t("panel.total", { n: list.total })}</span>
-            )}
-          </div>
+          <PanelHead
+            title="maint.panel"
+            trashed={list.trashed}
+            total={list.total}
+            selectedCount={selectedKeys.length}
+            onBulkDelete={() => setBulkConfirm(true)}
+            onClearSelection={clear}
+          />
           <div className="table-wrap">
             <Table<Maintenance>
               rowKey="maintenance_id"
               columns={columns}
               scroll={TABLE_SCROLL}
-              rowSelection={{
-                selectedRowKeys: selectedKeys,
-                onChange: (keys) => setSelectedKeys(keys as string[]),
-              }}
+              rowSelection={rowSelection}
               onRow={(m) => ({
                 onClick: () => setSelected(m),
                 className: selected?.maintenance_id === m.maintenance_id ? "row-selected" : "",
@@ -329,8 +306,7 @@ export const MaintenanceScreen = ({
         ) : (
           <div className="panel detail-panel">
             <div className="detail-panel-empty">
-              Select a repair to read its story — problem, fix, result, and this
-              device's other repairs.
+              {t("detail.empty.maintenance")}
             </div>
           </div>
         )}

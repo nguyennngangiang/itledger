@@ -17,10 +17,15 @@ be/                 FastAPI backend (Python 3.12, asyncpg)
   search.py         Shared client for the ai `/rank` embedder
   extract.py        Client for the LLM server's /rag/extract (Ask AI file uploads)
   glossary.py       bilingualize(): append Vietnamese synonyms of English IT terms
+  constants.py      GHOST_CODE / IT_HELD_STATUSES — imports nothing, so anything may import it
+  migrations.py     Idempotent startup DDL, in order. Run once from the lifespan
   models/           Pydantic schemas (Create / Update / Out / Delete) per resource
+                    + page.py: Page[T], Ranked, ImportResult shared by every router
   repositories/     ALL SQL lives here (one module per resource) + errors.py
-  routers/          Thin HTTP layer — parse, call repo, map errors to status codes
+                    + _crud.py: Table spec, Where, paginate, soft-delete family
+  routers/          Thin HTTP layer — parse, call repo. Domain errors → 409 in main.py
   sql/schema.sql    Table DDL (run once by Postgres on first container start)
+  sql/migrations/   Hand-applied SQL for anything too heavy for startup
   seed.py           Idempotent sample-data seeder
   docker-compose.yml       Postgres + API (dev: hot reload, ports on 0.0.0.0)
   docker-compose.prod.yml  LAN overlay: no reload, restart policy, loopback ports
@@ -154,11 +159,25 @@ returns the SPA. Both handlers must be `handle` blocks.
 ## Conventions
 
 - **Router stays thin; SQL only in `repositories/`.** Never string-format user
-  values into SQL — use asyncpg `$1, $2` placeholders. `ORDER BY` / filter
-  columns are allow-listed (see `SORTABLE_FIELDS` / `FILTERABLE_FIELDS`).
+  values into SQL — use asyncpg `$1, $2` placeholders. Identifiers (table,
+  `ORDER BY` column) can't be parameters, so they are allow-listed in one
+  `_crud.Table` spec per resource and validated at import; read the docstring in
+  `repositories/_crud.py` before touching that path. A rejected `order_by` is
+  *replaced* with the default, never rejected-then-used.
+- **Domain errors are mapped centrally.** `DuplicateError` / `ForeignKeyError` /
+  `InUseError` / `ProtectedError` all become 409 via `app.add_exception_handler`
+  in `main.py`, so routers don't catch them. `ValueError` deliberately is *not*
+  mapped — Pydantic and the stdlib raise it, and a global handler would hide
+  real bugs behind 4xx. 404s stay as explicit one-liners in each router.
 - **Soft delete / trash.** `delete` sets `deleted_at`; `restore` clears it;
   `purge` (or `?permanent=true`) hard-deletes. List endpoints take `deleted`
-  to switch between active rows and the trash.
+  to switch between active rows and the trash. All four resources delegate to
+  `_crud`; per-resource policy (the ghost guard, still-owns-devices) wraps it in
+  the repo rather than living in the helper. `restore` is idempotent on purpose
+  — see its docstring before "fixing" the missing guard.
+- **Purging can be refused.** Handovers and maintenance FK to `devices`, and
+  handovers FK to `users`, with no cascade — so a row with history returns 409,
+  not 500. That is 216 of 327 devices on the live ledger: the common case.
 - **Bulk delete.** Each resource exposes `DELETE /<resource>/batch` (id list in
   the body, `?permanent=`). Declared before `/{id}` so "batch" isn't read as an
   id. Frontend: `delete*Batch()` in `src/api/`, driven by the shared
@@ -182,14 +201,18 @@ returns the SPA. Both handlers must be `handle` blocks.
   natural-language sentence (device: specs + owner team + repair count;
   maintenance: the repair story + device + team; handover: device + who
   gave/received + reason), calls the `ai` service `/rank`, and returns the rows
-  with a `score`. Each screen's **"Smart"** toggle swaps the normal search for
-  the ranked results, rendered with the shared relevance meter + "why matched"
-  proof popover (`lib/relevance.tsx` `useSmartProof`). Each screen also has an
-  **LLM rerank** toggle (`?rerank=true`) and a **mark-correct** button that feeds
-  `search_feedback` (project-local few-shot — see "LLM" above); the Devices screen
-  adds an **Ask AI** chat. The embedder itself is local/offline — no external API;
-  it runs on the host via OpenVINO, preferring the **Intel NPU** (see the
-  AI service note above); the Docker API calls it at `host.docker.internal:8001`.
+  with a `score`, and `?rerank=true` re-sorts them with the LLM. **These are
+  backend-only today.** The per-screen "Smart" toggle, the relevance meter and
+  "why matched" popover (`lib/relevance.tsx` `useSmartProof`), the rerank toggle
+  and the mark-correct button that fed `search_feedback` were all **removed from
+  the frontend** — the screens now filter as-you-type through `usePagedList`
+  (see the note at the top of `fe/src/api/devices.ts`). The one remaining
+  frontend consumer of the ranking path is **Ask AI**, which lives in the
+  **header**, not on the Devices screen (`App.tsx`), and reaches it through the
+  assistant's `semantic_search` tool. The embedder itself is local/offline — no
+  external API; it runs on the host via OpenVINO, preferring the **Intel NPU**
+  (see the AI service note above); the Docker API reaches it at
+  `AI_URL` (`host.docker.internal:8010`).
   The data is English but the team searches in Vietnamese, so each flattened
   document is **bilingually enriched** (`be/glossary.py` `bilingualize()`):
   recognised English IT terms get their Vietnamese synonyms appended, so a

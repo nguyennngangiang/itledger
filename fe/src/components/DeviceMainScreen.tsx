@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Table, Button, Input, Popover } from "antd";
+import { Table, Button, Popover } from "antd";
 import type { TableColumnsType } from "antd";
 import { toast } from "react-toastify";
 import {
@@ -13,19 +13,20 @@ import type { Device, DeviceStatus, User } from "../types";
 import { DEVICE_STATUS_META, DEVICE_STATUS_ORDER } from "../types";
 import { CreateDeviceModal } from "./Modal/CreateDeviceModal";
 import { ConfirmModal } from "./Modal/ConfirmModal";
-import { BulkDeleteBar } from "./BulkDeleteBar";
+import { PanelHead } from "./PanelHead";
+import { SearchBox } from "./SearchBox";
 import { TrashToggle } from "./TrashToggle";
 import {
   PlusIcon,
   RefreshIcon,
   DownloadIcon,
-  SearchIcon,
   TrashIcon,
   EditIcon,
   InfoIcon,
 } from "./icons";
 import { formatDate, resolveOwner, toUserMap } from "../lib/format";
 import { usePagedList } from "../lib/usePagedList";
+import { useTableSelection } from "../lib/useTableSelection";
 import { TABLE_SCROLL } from "../lib/table";
 import { ApiError } from "../api/client";
 import { useT } from "../i18n/useT";
@@ -43,11 +44,9 @@ export const DeviceMainScreen = ({
 }) => {
   const { t } = useT();
   const [users, setUsers] = useState<Record<string, User>>({});
-  const [searchText, setSearchText] = useState("");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
   const [editTarget, setEditTarget] = useState<Device | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<Device | null>(null);
-  const [selectedKeys, setSelectedKeys] = useState<string[]>([]);
   const [bulkConfirm, setBulkConfirm] = useState(false);
   const [exporting, setExporting] = useState(false);
 
@@ -57,6 +56,9 @@ export const DeviceMainScreen = ({
     status: statusFilter === "all" ? undefined : statusFilter,
     refreshKey,
   });
+  // Drop any selection when the view (active/trash or status filter) changes.
+  const { selectedKeys, setSelectedKeys, clear, rowSelection } =
+    useTableSelection(list.trashed, statusFilter);
 
   useEffect(() => {
     // Includes trashed staff: a device's owner may have left, and the row
@@ -65,9 +67,6 @@ export const DeviceMainScreen = ({
       .then((u) => setUsers(toUserMap(u)))
       .catch(() => {});
   }, []);
-
-  // Drop any selection when the view (active/trash or status filter) changes.
-  useEffect(() => setSelectedKeys([]), [list.trashed, statusFilter]);
 
   /** Download the WHOLE ledger, deliberately ignoring the search box, the status
    * chips and the sort — "export the device list" means the list, not whatever
@@ -269,20 +268,7 @@ export const DeviceMainScreen = ({
   return (
     <>
       <div className="screen-toolbar">
-        <div className="screen-search">
-          <Input
-            allowClear
-            prefix={<SearchIcon size={16} />}
-            placeholder={t("search.device")}
-            style={{ width: 320 }}
-            value={searchText}
-            onChange={(e) => {
-              setSearchText(e.target.value);
-              list.search(e.target.value.trim());
-            }}
-            onPressEnter={() => list.searchNow(searchText.trim())}
-          />
-        </div>
+        <SearchBox placeholder={t("search.device")} {...list.searchProps} />
         <div className="toolbar-actions">
           <Button
             icon={<DownloadIcon size={16} />}
@@ -323,30 +309,20 @@ export const DeviceMainScreen = ({
       )}
 
       <div className="panel">
-        <div className="panel-head">
-          <span className="panel-title">
-            {t(list.trashed ? "panel.trash" : "device.panel")}
-          </span>
-          {selectedKeys.length > 0 ? (
-            <BulkDeleteBar
-              count={selectedKeys.length}
-              trashed={list.trashed}
-              onDelete={() => setBulkConfirm(true)}
-              onClear={() => setSelectedKeys([])}
-            />
-          ) : (
-            <span className="panel-count">{t("panel.total", { n: list.total })}</span>
-          )}
-        </div>
+        <PanelHead
+          title="device.panel"
+          trashed={list.trashed}
+          total={list.total}
+          selectedCount={selectedKeys.length}
+          onBulkDelete={() => setBulkConfirm(true)}
+          onClearSelection={clear}
+        />
         <div className="table-wrap">
           <Table<Device>
             rowKey="serial_number"
             columns={columns}
             scroll={TABLE_SCROLL}
-            rowSelection={{
-              selectedRowKeys: selectedKeys,
-              onChange: (keys) => setSelectedKeys(keys as string[]),
-            }}
+            rowSelection={rowSelection}
             {...list.tableProps}
           />
         </div>

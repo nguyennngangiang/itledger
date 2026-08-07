@@ -185,8 +185,8 @@ Base URL `http://localhost:8000`. JSON is **snake_case** both ways. Conventions:
 ## 🖼️ Screens
 
 - **Dashboard** — fleet KPI cards, brand/CPU/OS pie charts, status bar chart, `ActivityFeed` (recent events), `AgingWatchlist` (devices ≥5 years old), and `RepairSpendPanel`.
-- **Devices** — the master screen: table with smart search + relevance meter, the `DeviceJourneyPanel` and `RepairStoryPanel` telling each device's story, plus **Ask AI** (`AssistantModal`) and import.
-- **Maintenance** — repair log with the smart-search + rerank + mark-correct toolset.
+- **Devices** — the master screen: table with as-you-type server-side search, the `DeviceJourneyPanel` and `RepairStoryPanel` telling each device's story, plus import. **Ask AI** (`AssistantModal`) sits in the header, not on this screen — it answers across all three resources.
+- **Maintenance** — repair log, with each row's full repair story alongside.
 - **Handover** — who gave/received each device and why.
 
 ---
@@ -218,7 +218,7 @@ deploy/             LAN deployment (see deploy/README.md)
 fe/                 React 19 + Vite 8 + TypeScript
   src/api/          One module per resource; fetches go through client.ts
   src/components/   Screens (Dashboard, DeviceMainScreen, …) + Modal/
-  src/lib/          format.ts, usePagedList.ts, sparkle.ts (anime.js), relevance.tsx
+  src/lib/          format.ts, usePagedList.ts, useTableSelection.ts, sparkle.ts
   src/types.ts      TS types mirroring the backend snake_case JSON
 ```
 
@@ -228,7 +228,7 @@ fe/                 React 19 + Vite 8 + TypeScript
 
 ## 🎨 Design & product
 
-IT Ledger is **"The Aurora Workspace"** — playful and delightful, resting on soft enterprise polish. A single periwinkle accent (`#7c74e8`) with a periwinkle→fuchsia aurora gradient reserved for signature moments (active nav, KPI numerals, primary CTA, the relevance meter). Inter throughout, frosted-glass panels, one glassy top nav (no sidebar) with an anime.js sliding indicator.
+IT Ledger is **"The Aurora Workspace"** — playful and delightful, resting on soft enterprise polish. A single periwinkle accent (`#7c74e8`) with a periwinkle→fuchsia aurora gradient reserved for signature moments (active nav, KPI numerals, primary CTA). Inter throughout, frosted-glass panels, one glassy top nav (no sidebar) with an anime.js sliding indicator.
 
 Core principles: **delight in a chore · story over cells · visibility at a glance · familiar affordances with personality · motion that always has a fallback.**
 

@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Table, Button, Input } from "antd";
+import { Table, Button } from "antd";
 import type { TableColumnsType } from "antd";
 import { toast } from "react-toastify";
 import {
@@ -13,10 +13,12 @@ import type { User, UserStatus } from "../types";
 import type { Key } from "../i18n/catalog";
 import EmployeeModal from "./Modal/EmployeeModal";
 import { ConfirmModal } from "./Modal/ConfirmModal";
-import { BulkDeleteBar } from "./BulkDeleteBar";
+import { PanelHead } from "./PanelHead";
+import { SearchBox } from "./SearchBox";
 import { TrashToggle } from "./TrashToggle";
-import { PlusIcon, RefreshIcon, SearchIcon, TrashIcon, EditIcon } from "./icons";
+import { PlusIcon, RefreshIcon, TrashIcon, EditIcon } from "./icons";
 import { usePagedList } from "../lib/usePagedList";
+import { useTableSelection } from "../lib/useTableSelection";
 import { TABLE_SCROLL } from "../lib/table";
 import { useT } from "../i18n/useT";
 
@@ -43,10 +45,8 @@ export const EmployeeScreen = ({
   onAdd?: () => void;
 }) => {
   const { t } = useT();
-  const [searchText, setSearchText] = useState("");
   const [editTarget, setEditTarget] = useState<User | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<User | null>(null);
-  const [selectedKeys, setSelectedKeys] = useState<string[]>([]);
   const [bulkConfirm, setBulkConfirm] = useState(false);
   // "all" | "active" | "retired" | "noTeam". The last one is not a status —
   // it finds the 35 people who arrived with no department and no HR record to
@@ -60,6 +60,11 @@ export const EmployeeScreen = ({
     noTeam: filter === "noTeam",
     refreshKey,
   });
+  // The rows about to be shown are a different set, so carrying keys over is a
+  // trap. This used to be done by hand in the TrashToggle and chip handlers,
+  // which missed every other way the view could change.
+  const { selectedKeys, setSelectedKeys, clear, rowSelection } =
+    useTableSelection(list.trashed, filter);
 
   const handleBulkDelete = async () => {
     setBulkConfirm(false);
@@ -186,30 +191,9 @@ export const EmployeeScreen = ({
   return (
     <>
       <div className="screen-toolbar">
-        <div className="screen-search">
-          <Input
-            allowClear
-            prefix={<SearchIcon size={16} />}
-            placeholder={t("search.employee")}
-            style={{ width: 320 }}
-            value={searchText}
-            onChange={(e) => {
-              setSearchText(e.target.value);
-              list.search(e.target.value.trim());
-            }}
-            onPressEnter={() => list.searchNow(searchText.trim())}
-          />
-        </div>
+        <SearchBox placeholder={t("search.employee")} {...list.searchProps} />
         <div className="toolbar-actions">
-          <TrashToggle
-            trashed={list.trashed}
-            // Drop the selection as part of switching views — the rows about to
-            // be shown are a different set, so carrying keys over is a trap.
-            onToggle={(next) => {
-              setSelectedKeys([]);
-              list.toggleTrash(next);
-            }}
-          />
+          <TrashToggle trashed={list.trashed} onToggle={list.toggleTrash} />
           <Button icon={<RefreshIcon size={16} />} onClick={list.reload}>
             {t("device.refresh")}
           </Button>
@@ -220,31 +204,21 @@ export const EmployeeScreen = ({
       </div>
 
       <div className="panel">
-        <div className="panel-head">
-          <span className="panel-title">
-            {t(list.trashed ? "panel.trash" : "employee.panel")}
-          </span>
-          {selectedKeys.length > 0 ? (
-            <BulkDeleteBar
-              count={selectedKeys.length}
-              trashed={list.trashed}
-              onDelete={() => setBulkConfirm(true)}
-              onClear={() => setSelectedKeys([])}
-            />
-          ) : (
-            <span className="panel-count">{t("panel.total", { n: list.total })}</span>
-          )}
-        </div>
+        <PanelHead
+          title="employee.panel"
+          trashed={list.trashed}
+          total={list.total}
+          selectedCount={selectedKeys.length}
+          onBulkDelete={() => setBulkConfirm(true)}
+          onClearSelection={clear}
+        />
         <div className="status-chips">
         {EMPLOYEE_FILTERS.map((f) => (
           <button
             key={f.value}
             className={`status-chip${filter === f.value ? " active" : ""}`}
             aria-pressed={filter === f.value}
-            onClick={() => {
-              setSelectedKeys([]);
-              setFilter(f.value);
-            }}
+            onClick={() => setFilter(f.value)}
           >
             {t(f.label)}
           </button>
@@ -256,10 +230,7 @@ export const EmployeeScreen = ({
             rowKey="employee_code"
             columns={columns}
             scroll={TABLE_SCROLL}
-            rowSelection={{
-              selectedRowKeys: selectedKeys,
-              onChange: (keys) => setSelectedKeys(keys as string[]),
-            }}
+            rowSelection={rowSelection}
             {...list.tableProps}
           />
         </div>

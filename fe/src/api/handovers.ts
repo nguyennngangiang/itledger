@@ -1,4 +1,4 @@
-import { request } from './client'
+import { deleteBatch, request } from './client'
 import type { Handover, HandoverCreate } from '../types'
 import { pageQuery } from './paging'
 import type { Paged, PageParams } from './paging'
@@ -59,8 +59,5 @@ export function deleteHandover(handoverId: string, permanent = false) {
 
 // Bulk delete by id (soft-delete, or purge when permanent).
 export function deleteHandoversBatch(ids: string[], permanent = false) {
-  return request<void>(`/handovers/batch${permanent ? '?permanent=true' : ''}`, {
-    method: 'DELETE',
-    body: JSON.stringify(ids),
-  })
+  return deleteBatch('handovers', ids, permanent)
 }

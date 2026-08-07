@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Table, Button, Input } from "antd";
+import { Table, Button } from "antd";
 import type { TableColumnsType } from "antd";
 import { toast } from "react-toastify";
 import {
@@ -13,12 +13,14 @@ import { listUsersIncludingDeleted } from "../api/users";
 import { listDevices } from "../api/devices";
 import type { Handover, Device, User } from "../types";
 import { ConfirmModal } from "./Modal/ConfirmModal";
-import { BulkDeleteBar } from "./BulkDeleteBar";
+import { PanelHead } from "./PanelHead";
+import { SearchBox } from "./SearchBox";
 import { TrashToggle } from "./TrashToggle";
 import HandoverModal from "./Modal/HandoverModal";
-import { PlusIcon, RefreshIcon, ArrowRightIcon, TrashIcon, EditIcon, SearchIcon } from "./icons";
+import { PlusIcon, RefreshIcon, ArrowRightIcon, TrashIcon, EditIcon } from "./icons";
 import { formatDate, resolveOwner, toUserMap } from "../lib/format";
 import { usePagedList } from "../lib/usePagedList";
+import { useTableSelection } from "../lib/useTableSelection";
 import { TABLE_SCROLL } from "../lib/table";
 import { DeviceJourneyPanel } from "./DeviceJourneyPanel";
 import { useT } from "../i18n/useT";
@@ -33,10 +35,8 @@ export const HandoverScreen = ({
   const { t } = useT();
   const [users, setUsers] = useState<Record<string, User>>({});
   const [devices, setDevices] = useState<Record<string, Device>>({});
-  const [searchText, setSearchText] = useState("");
   const [deleteTarget, setDeleteTarget] = useState<Handover | null>(null);
   const [editTarget, setEditTarget] = useState<Handover | null>(null);
-  const [selectedKeys, setSelectedKeys] = useState<string[]>([]);
   const [bulkConfirm, setBulkConfirm] = useState(false);
   const [selected, setSelected] = useState<Handover | null>(null);
   const [deviceHandovers, setDeviceHandovers] = useState<Handover[]>([]);
@@ -46,8 +46,8 @@ export const HandoverScreen = ({
     defaultOrder: "desc",
     refreshKey,
   });
-
-  useEffect(() => setSelectedKeys([]), [list.trashed]);
+  const { selectedKeys, setSelectedKeys, clear, rowSelection } =
+    useTableSelection(list.trashed);
 
   // Selecting a handover loads that device's full transfer history for the
   // journey panel (not just the current page of results).
@@ -74,9 +74,9 @@ export const HandoverScreen = ({
     try {
       await deleteHandoversBatch(selectedKeys, list.trashed);
       toast.success(
-        `${selectedKeys.length} record(s) ${
-          list.trashed ? "permanently deleted" : "moved to trash"
-        }`,
+        t(list.trashed ? "row.bulk.deleted" : "row.bulk.trashed", {
+          n: selectedKeys.length,
+        }),
       );
       setSelectedKeys([]);
     } catch (e) {
@@ -219,20 +219,7 @@ export const HandoverScreen = ({
   return (
     <>
       <div className="screen-toolbar">
-        <div className="screen-search">
-          <Input
-            allowClear
-            prefix={<SearchIcon size={16} />}
-            placeholder={t("search.handover")}
-            style={{ width: 320 }}
-            value={searchText}
-            onChange={(e) => {
-              setSearchText(e.target.value);
-              list.search(e.target.value.trim());
-            }}
-            onPressEnter={() => list.searchNow(searchText.trim())}
-          />
-        </div>
+        <SearchBox placeholder={t("search.handover")} {...list.searchProps} />
         <div className="toolbar-actions">
           <TrashToggle trashed={list.trashed} onToggle={list.toggleTrash} />
           <Button icon={<RefreshIcon size={16} />} onClick={list.reload}>
@@ -246,30 +233,20 @@ export const HandoverScreen = ({
 
       <div className="split-view">
         <div className="panel table-panel">
-          <div className="panel-head">
-            <span className="panel-title">
-              {t(list.trashed ? "panel.trash" : "handover.panel")}
-            </span>
-            {selectedKeys.length > 0 ? (
-              <BulkDeleteBar
-                count={selectedKeys.length}
-                trashed={list.trashed}
-                onDelete={() => setBulkConfirm(true)}
-                onClear={() => setSelectedKeys([])}
-              />
-            ) : (
-              <span className="panel-count">{t("panel.total", { n: list.total })}</span>
-            )}
-          </div>
+          <PanelHead
+            title="handover.panel"
+            trashed={list.trashed}
+            total={list.total}
+            selectedCount={selectedKeys.length}
+            onBulkDelete={() => setBulkConfirm(true)}
+            onClearSelection={clear}
+          />
           <div className="table-wrap">
             <Table<Handover>
               rowKey="handover_id"
               columns={columns}
               scroll={TABLE_SCROLL}
-              rowSelection={{
-                selectedRowKeys: selectedKeys,
-                onChange: (keys) => setSelectedKeys(keys as string[]),
-              }}
+              rowSelection={rowSelection}
               onRow={(h) => ({
                 onClick: () => setSelected(h),
                 className: selected?.handover_id === h.handover_id ? "row-selected" : "",
@@ -289,7 +266,7 @@ export const HandoverScreen = ({
         ) : (
           <div className="panel detail-panel">
             <div className="detail-panel-empty">
-              Select a handover to trace its device's full chain of custody.
+              {t("detail.empty.handover")}
             </div>
           </div>
         )}

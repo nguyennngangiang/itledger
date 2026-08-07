@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { TablePaginationConfig } from "antd";
+import type { SorterResult } from "antd/es/table/interface";
 import { toast } from "react-toastify";
 import type { Paged, PageParams } from "../api/paging";
 import { useLoading } from "../hook/LoadingContext";
@@ -48,6 +49,11 @@ export function usePagedList<T>(
   const [orderBy, setOrderBy] = useState<string | undefined>(defaultOrderBy);
   const [order, setOrder] = useState<SortOrder>(defaultOrder);
   const [q, setQ] = useState("");
+  // The text in the box, as opposed to `q` which is the debounced value actually
+  // sent. Owned here rather than in each screen: every screen kept its own
+  // useState and synced it to the hook by hand, four copies of the same thirteen
+  // lines, because the hook exposed `q` but no controlled value/onChange pair.
+  const [searchText, setSearchText] = useState("");
   const [trashed, setTrashed] = useState(false);
 
   const [tableLoading, setTableLoading] = useState(false);
@@ -158,6 +164,11 @@ export function usePagedList<T>(
           deleted: true,
           q: q || undefined,
           status,
+          // Must match `load` above. Without it, Employees with the "no
+          // department" chip on would probe for ANY trashed user, so a bin
+          // holding only users who DO have a department reported non-empty and
+          // opened onto an empty table instead of showing trash.empty.
+          noTeam,
         });
         if (!res.total) {
           toast.info(t("trash.empty"));
@@ -174,7 +185,9 @@ export function usePagedList<T>(
   const onTableChange = (
     pagination: TablePaginationConfig,
     _filters: unknown,
-    sorter: any,
+    // Ant hands back an array when several columns are sortable at once; only
+    // the first matters here, since the server takes one ORDER BY column.
+    sorter: SorterResult<T> | SorterResult<T>[],
   ) => {
     if (pagination.current) setPage(pagination.current);
     if (pagination.pageSize) setPageSize(pagination.pageSize);
@@ -186,6 +199,16 @@ export function usePagedList<T>(
       setOrderBy(defaultOrderBy);
       setOrder(defaultOrder);
     }
+  };
+
+  /** Spread onto <SearchBox>, the way tableProps is spread onto <Table>. */
+  const searchProps = {
+    value: searchText,
+    onChange: (value: string) => {
+      setSearchText(value);
+      search(value.trim());
+    },
+    onPressEnter: () => searchNow(searchText.trim()),
   };
 
   const tableProps = {
@@ -212,6 +235,7 @@ export function usePagedList<T>(
     searchNow,
     toggleTrash,
     reload: () => load(false),
+    searchProps,
     tableProps,
   };
 }

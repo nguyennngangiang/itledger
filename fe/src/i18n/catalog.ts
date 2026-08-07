@@ -348,6 +348,10 @@ export const EN = {
   "detail.close": "Close",
   "detail.unknownDevice": "Unknown device",
   "detail.bought": "{serial} · bought {date}",
+  "detail.empty.maintenance":
+    "Select a repair to read its story — problem, fix, result, and this device's other repairs.",
+  "detail.empty.handover":
+    "Select a handover to trace its device's full chain of custody.",
   "journey.title": "Device journey",
   "journey.count": "{n} handovers",
   "journey.empty": "No handover history for this device yet.",
