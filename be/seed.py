@@ -229,12 +229,6 @@ async def seed() -> None:
                    WHERE status IS NULL""",
                 GHOST_CODE,
             )
-            # Mirror current ownership into the user_devices join table.
-            await conn.executemany(
-                """INSERT INTO user_devices (user_id, device_id)
-                   VALUES ($1, $2) ON CONFLICT DO NOTHING""",
-                [(d["user_id"], d["serial_number"]) for d in devices if d["user_id"]],
-            )
             await conn.executemany(
                 """INSERT INTO handovers (handover_id, handover_date, device_id,
                        from_user_id, to_user_id, reason)

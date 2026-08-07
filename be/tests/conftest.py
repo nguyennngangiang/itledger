@@ -30,8 +30,7 @@ SCHEMA_FILE = Path(__file__).resolve().parent.parent / "sql" / "schema.sql"
 
 # Every table the app owns, in FK-safe order for TRUNCATE ... CASCADE.
 ALL_TABLES = (
-    "handovers, maintenance, user_devices, devices, users, search_feedback, "
-    "import_issues"
+    "handovers, maintenance, devices, users, search_feedback, import_issues"
 )
 
 

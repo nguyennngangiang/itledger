@@ -218,8 +218,8 @@ export function ResolveConflictModal({
  * The code-mismatch choice: which employee code this record should use. A
  * record-level decision, not a field one — the same person appears to exist under
  * a code that differs from the minutes' by a character or two. Merging is
- * deliberately not offered: devices, handovers and user_devices all point at a
- * code, so a merge is its own job with its own review.
+ * deliberately not offered: devices and handovers both point at a code, so a
+ * merge is its own job with its own review.
  */
 export function CodeChoiceField({
   issue,

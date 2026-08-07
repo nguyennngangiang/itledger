@@ -65,11 +65,10 @@ CREATE TABLE maintenance (
     deleted_at TIMESTAMP
 );
 
-CREATE TABLE user_devices (
-    user_id VARCHAR(100) REFERENCES users(employee_code),
-    device_id VARCHAR(100) REFERENCES devices(serial_number),
-    PRIMARY KEY (user_id, device_id)
-);
+-- There is no user_devices join table. A device has exactly one owner and
+-- devices.user_id is where it lives; the join table mirrored that, was never
+-- read by anything, and drifted (166 rows, 131 agreeing). Retired by
+-- sql/migrations/0001_retire_user_devices.sql — don't reintroduce it.
 
 -- Smart-search relevance feedback: each row marks a result correct (label=1) or
 -- not (label=0) for a query on a given resource (devices/maintenance/handovers).

@@ -262,8 +262,8 @@ async def _namesakes(pool, name: str | None, code: str | None) -> list[dict]:
     """People stored under this same name whose CODE looks like a mistyping of this
     one — see _confusable for why the name alone is not a signal.
 
-    Never merged automatically: FKs reach devices, handovers and user_devices, so a
-    human rules on it. Checked whether or not the code in the minutes exists.
+    Never merged automatically: FKs reach devices and handovers, so a human rules
+    on it. Checked whether or not the code in the minutes exists.
     """
     if not name:
         return []

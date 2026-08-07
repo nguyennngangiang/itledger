@@ -49,7 +49,9 @@ async def run() -> None:
     devices = data["devices"]
     handovers = data["handovers"]
     maintenance = data["maintenance"]
-    user_devices = data["user_devices"]
+    # data["user_devices"] is ignored: the join table it fed has been retired
+    # (be/sql/migrations/0001_retire_user_devices.sql). _build_import.mjs still
+    # emits the key — it is one-shot scaffolding with no reason to change.
 
     conn = await asyncpg.connect(dsn=settings.database_url)
     try:
@@ -66,7 +68,7 @@ async def run() -> None:
 
             # --- wipe everything ---
             await conn.execute(
-                "TRUNCATE handovers, maintenance, user_devices, devices, users "
+                "TRUNCATE handovers, maintenance, devices, users "
                 "RESTART IDENTITY CASCADE"
             )
 
@@ -85,13 +87,6 @@ async def run() -> None:
                 [(d["serial_number"], d["barcode"], d["type"], d["brand"], d["cpu"],
                   d["ram"], d["storage"], d["os"], d["msoffice"], to_date(d["buy_date"]),
                   d["name"], d["user_id"], d["status"]) for d in devices],
-            )
-
-            # --- user_devices (ownership mirror) ---
-            await conn.executemany(
-                """INSERT INTO user_devices (user_id, device_id)
-                   VALUES ($1, $2) ON CONFLICT DO NOTHING""",
-                [(ud["user_id"], ud["device_id"]) for ud in user_devices],
             )
 
             # --- handovers ---
