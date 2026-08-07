@@ -7,32 +7,30 @@ import {
   deleteDevice,
   deleteDevicesBatch,
   restoreDevice,
-  semanticSearchDevices,
 } from "../api/devices";
-import { listUsers } from "../api/users";
-import type { Device, DeviceRanked, DeviceStatus, User } from "../types";
+import { listUsersIncludingDeleted } from "../api/users";
+import type { Device, DeviceStatus, User } from "../types";
 import { DEVICE_STATUS_META, DEVICE_STATUS_ORDER } from "../types";
 import { CreateDeviceModal } from "./Modal/CreateDeviceModal";
-import { ImportDevicesModal } from "./Modal/ImportDevicesModal";
 import { ConfirmModal } from "./Modal/ConfirmModal";
 import { BulkDeleteBar } from "./BulkDeleteBar";
 import { TrashToggle } from "./TrashToggle";
 import {
   PlusIcon,
   RefreshIcon,
+  DownloadIcon,
   SearchIcon,
   TrashIcon,
   EditIcon,
   InfoIcon,
-  UploadIcon,
-  SparklesIcon,
-  ProveIcon,
 } from "./icons";
-import { useSmartProof } from "../lib/relevance";
-import { AssistantModal } from "./Modal/AssistantModal";
 import { formatDate, resolveOwner, toUserMap } from "../lib/format";
 import { usePagedList } from "../lib/usePagedList";
 import { TABLE_SCROLL } from "../lib/table";
+import { ApiError } from "../api/client";
+import { useT } from "../i18n/useT";
+import { exportDevices } from "../lib/exportDevices";
+import { todayIsoDate } from "../lib/format";
 
 type StatusFilter = DeviceStatus | "all";
 
@@ -43,6 +41,7 @@ export const DeviceMainScreen = ({
   refreshKey?: number;
   onAdd?: () => void;
 }) => {
+  const { t } = useT();
   const [users, setUsers] = useState<Record<string, User>>({});
   const [searchText, setSearchText] = useState("");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
@@ -50,50 +49,7 @@ export const DeviceMainScreen = ({
   const [deleteTarget, setDeleteTarget] = useState<Device | null>(null);
   const [selectedKeys, setSelectedKeys] = useState<string[]>([]);
   const [bulkConfirm, setBulkConfirm] = useState(false);
-  const [showImport, setShowImport] = useState(false);
-  // Smart (semantic) search state. When aiResults !== null the table shows the
-  // ranked results instead of the normal paged list.
-  const [smart, setSmart] = useState(false);
-  const [rerank, setRerank] = useState(false); // LLM re-sort of smart results
-  const [aiResults, setAiResults] = useState<DeviceRanked[] | null>(null);
-  const [aiQuery, setAiQuery] = useState("");
-  const [aiLoading, setAiLoading] = useState(false);
-  const [showAssistant, setShowAssistant] = useState(false);
-
-  const showingAi = aiResults !== null;
-
-  const { proofColumn } = useSmartProof<Device>({
-    resource: "devices",
-    query: aiQuery,
-    idOf: (d) => d.serial_number,
-  });
-
-  const clearAi = () => {
-    setAiResults(null);
-    setAiQuery("");
-  };
-
-  const runSearch = async () => {
-    const q = searchText.trim();
-    if (!smart) {
-      list.applySearch(q);
-      return;
-    }
-    if (!q) {
-      clearAi();
-      return;
-    }
-    setAiLoading(true);
-    try {
-      const res = await semanticSearchDevices(q, 30, rerank);
-      setAiResults(res);
-      setAiQuery(q);
-    } catch (e) {
-      toast.error("Smart search failed: " + e);
-    } finally {
-      setAiLoading(false);
-    }
-  };
+  const [exporting, setExporting] = useState(false);
 
   const list = usePagedList<Device>(pageDevices, {
     defaultOrderBy: "serial_number",
@@ -103,24 +59,43 @@ export const DeviceMainScreen = ({
   });
 
   useEffect(() => {
-    listUsers().then((u) => setUsers(toUserMap(u))).catch(() => {});
+    // Includes trashed staff: a device's owner may have left, and the row
+    // should still show their name rather than a bare code.
+    listUsersIncludingDeleted()
+      .then((u) => setUsers(toUserMap(u)))
+      .catch(() => {});
   }, []);
 
   // Drop any selection when the view (active/trash or status filter) changes.
   useEffect(() => setSelectedKeys([]), [list.trashed, statusFilter]);
+
+  /** Download the WHOLE ledger, deliberately ignoring the search box, the status
+   * chips and the sort — "export the device list" means the list, not whatever
+   * happens to be filtered on screen. */
+  const runExport = async () => {
+    setExporting(true);
+    try {
+      const n = await exportDevices(users, todayIsoDate());
+      toast[n ? "success" : "info"](t(n ? "export.done" : "export.empty", { n }));
+    } catch (e) {
+      toast.error(e instanceof ApiError ? e.message : t("export.failed"));
+    } finally {
+      setExporting(false);
+    }
+  };
 
   const handleBulkDelete = async () => {
     setBulkConfirm(false);
     try {
       await deleteDevicesBatch(selectedKeys, list.trashed);
       toast.success(
-        `${selectedKeys.length} device(s) ${
-          list.trashed ? "permanently deleted" : "moved to trash"
-        }`,
+        t(list.trashed ? "row.bulk.deleted" : "row.bulk.trashed", {
+          n: selectedKeys.length,
+        }),
       );
       setSelectedKeys([]);
     } catch (e) {
-      toast.error("Failed: " + e);
+      toast.error(t("row.toast.failed", { error: String(e) }));
     } finally {
       list.reload();
     }
@@ -130,9 +105,11 @@ export const DeviceMainScreen = ({
     setDeleteTarget(null);
     try {
       await deleteDevice(serial, permanent);
-      toast.success(permanent ? "Device permanently deleted" : "Moved to trash");
+      toast.success(
+        t(permanent ? "device.toast.deleted" : "row.toast.trashed"),
+      );
     } catch (e) {
-      toast.error("Failed: " + e);
+      toast.error(t("row.toast.failed", { error: String(e) }));
     } finally {
       list.reload();
     }
@@ -141,9 +118,9 @@ export const DeviceMainScreen = ({
   const handleRestore = async (serial: string) => {
     try {
       await restoreDevice(serial);
-      toast.success("Device restored");
+      toast.success(t("device.toast.restored"));
     } catch (e) {
-      toast.error("Failed: " + e);
+      toast.error(t("row.toast.failed", { error: String(e) }));
     } finally {
       list.reload();
     }
@@ -153,14 +130,14 @@ export const DeviceMainScreen = ({
 
   const specBubble = (d: Device) => {
     const rows: [string, string | null][] = [
-      ["Barcode", d.barcode],
-      ["Type", d.type],
-      ["Brand", d.brand],
-      ["CPU", d.cpu],
-      ["RAM", d.ram],
-      ["Storage", d.storage],
-      ["OS", d.os],
-      ["MS Office", d.msoffice],
+      [t("field.barcode"), d.barcode],
+      [t("field.type"), d.type],
+      [t("field.brand"), d.brand],
+      [t("field.cpu"), d.cpu],
+      [t("field.ram"), d.ram],
+      [t("field.storage"), d.storage],
+      [t("field.os"), d.os],
+      [t("field.msoffice"), d.msoffice],
     ];
     return (
       <dl className="detail-bubble">
@@ -176,7 +153,7 @@ export const DeviceMainScreen = ({
 
   const columns: TableColumnsType<Device> = [
     {
-      title: "Device",
+      title: t("device.col.device"),
       dataIndex: "name",
       key: "name",
       sorter: true,
@@ -185,7 +162,7 @@ export const DeviceMainScreen = ({
       ),
     },
     {
-      title: "Owner",
+      title: t("device.col.owner"),
       key: "owner",
       render: (_, d) => {
         const o = resolveOwner(d.user_id, users);
@@ -198,13 +175,13 @@ export const DeviceMainScreen = ({
       },
     },
     {
-      title: "Serial Number",
+      title: t("device.col.serial"),
       dataIndex: "serial_number",
       key: "serial_number",
       sorter: true,
     },
     {
-      title: "Status",
+      title: t("device.col.status"),
       dataIndex: "status",
       key: "status",
       sorter: true,
@@ -222,7 +199,7 @@ export const DeviceMainScreen = ({
       },
     },
     {
-      title: "Buy Date",
+      title: t("device.col.buyDate"),
       dataIndex: "buy_date",
       key: "buy_date",
       sorter: true,
@@ -232,15 +209,20 @@ export const DeviceMainScreen = ({
       title: "",
       key: "options",
       width: 132,
-      render: (_, d) =>
-        list.trashed ? (
+      render: (_, d) => {
+        // Every row renders the same icons, so the accessible name has to name
+        // the row too — otherwise a screen reader hears "button" twenty times.
+        const label = d.name ?? d.serial_number;
+        return list.trashed ? (
           <div className="flex items-center gap-1">
             <Button size="small" onClick={() => handleRestore(d.serial_number)}>
-              Restore
+              {t("row.action.restore")}
             </Button>
             <Button
               type="text"
               danger
+              aria-label={t("row.action.deleteForever", { label })}
+              title={t("row.action.deleteForever", { label })}
               icon={<TrashIcon size={18} />}
               onClick={() => setDeleteTarget(d)}
             />
@@ -248,28 +230,37 @@ export const DeviceMainScreen = ({
         ) : (
           <div className="flex items-center gap-1">
             <Popover
-              title={d.name ?? d.serial_number}
+              title={label}
               content={specBubble(d)}
-              trigger="hover"
+              trigger={["hover", "focus"]}
               placement="left"
             >
-              <span className="info-trigger">
+              <span
+                className="info-trigger"
+                tabIndex={0}
+                aria-label={t("row.action.specs", { label })}
+              >
                 <InfoIcon size={18} />
               </span>
             </Popover>
             <Button
               type="text"
+              aria-label={t("row.action.edit", { label })}
+              title={t("row.action.edit", { label })}
               icon={<EditIcon size={18} />}
               onClick={() => setEditTarget(d)}
             />
             <Button
               type="text"
               danger
+              aria-label={t("row.action.trash", { label })}
+              title={t("row.action.trash", { label })}
               icon={<TrashIcon size={18} />}
               onClick={() => setDeleteTarget(d)}
             />
           </div>
-        ),
+        );
+      },
     },
   ];
 
@@ -281,70 +272,37 @@ export const DeviceMainScreen = ({
         <div className="screen-search">
           <Input
             allowClear
-            prefix={
-              smart ? <SparklesIcon size={16} /> : <SearchIcon size={16} />
-            }
-            placeholder={
-              smart
-                ? "Describe what you're looking for… (Enter)"
-                : "Search devices, owners… (Enter)"
-            }
+            prefix={<SearchIcon size={16} />}
+            placeholder={t("search.device")}
             style={{ width: 320 }}
             value={searchText}
             onChange={(e) => {
               setSearchText(e.target.value);
-              if (e.target.value === "") {
-                if (smart) clearAi();
-                else list.applySearch("");
-              }
+              list.search(e.target.value.trim());
             }}
-            onPressEnter={runSearch}
+            onPressEnter={() => list.searchNow(searchText.trim())}
           />
-          <Button
-            type={smart ? "primary" : "default"}
-            icon={<SparklesIcon size={16} />}
-            title="AI semantic search — search by meaning, not keywords"
-            onClick={() => {
-              const next = !smart;
-              setSmart(next);
-              if (!next) clearAi();
-            }}
-          >
-            {smart ? "Smart: on" : "Smart"}
-          </Button>
-          {smart && (
-            <Button
-              type={rerank ? "primary" : "default"}
-              icon={<ProveIcon size={16} />}
-              title="Re-rank smart results with the LLM — it learns from your marks"
-              onClick={() => setRerank((v) => !v)}
-            >
-              {rerank ? "LLM rerank: on" : "LLM rerank"}
-            </Button>
-          )}
         </div>
         <div className="toolbar-actions">
           <Button
-            icon={<SparklesIcon size={16} />}
-            onClick={() => setShowAssistant(true)}
-            title="Ask the AI about your fleet"
+            icon={<DownloadIcon size={16} />}
+            loading={exporting}
+            onClick={runExport}
+            title={t("export.title")}
           >
-            Ask AI
+            {t("export.button")}
           </Button>
           <TrashToggle trashed={list.trashed} onToggle={list.toggleTrash} />
           <Button icon={<RefreshIcon size={16} />} onClick={list.reload}>
-            Refresh
-          </Button>
-          <Button icon={<UploadIcon size={16} />} onClick={() => setShowImport(true)}>
-            Import
+            {t("device.refresh")}
           </Button>
           <Button type="primary" icon={<PlusIcon size={16} />} onClick={onAdd}>
-            Add Device
+            {t("device.add")}
           </Button>
         </div>
       </div>
 
-      {!list.trashed && !showingAi && (
+      {!list.trashed && (
         <div className="status-chips">
           {statusChips.map((s) => (
             <button
@@ -358,35 +316,16 @@ export const DeviceMainScreen = ({
                   style={{ background: DEVICE_STATUS_META[s].color }}
                 />
               )}
-              {s === "all" ? "All" : DEVICE_STATUS_META[s].label}
+              {s === "all" ? t("device.chip.all") : DEVICE_STATUS_META[s].label}
             </button>
           ))}
-        </div>
-      )}
-
-      {showingAi && (
-        <div className="ai-banner">
-          <span className="ai-banner-text">
-            <SparklesIcon size={16} />
-            Smart results for <b>“{aiQuery}”</b> — {aiResults!.length} matches,
-            {rerank
-              ? " re-ranked by the LLM · it learns from your marks"
-              : " ranked by meaning"}
-          </span>
-          <Button size="small" onClick={clearAi}>
-            Clear
-          </Button>
         </div>
       )}
 
       <div className="panel">
         <div className="panel-head">
           <span className="panel-title">
-            {showingAi
-              ? "Smart results"
-              : list.trashed
-              ? "Trash"
-              : "Device inventory"}
+            {t(list.trashed ? "panel.trash" : "device.panel")}
           </span>
           {selectedKeys.length > 0 ? (
             <BulkDeleteBar
@@ -396,37 +335,20 @@ export const DeviceMainScreen = ({
               onClear={() => setSelectedKeys([])}
             />
           ) : (
-            <span className="panel-count">
-              {showingAi ? `${aiResults!.length} matches` : `${list.total} total`}
-            </span>
+            <span className="panel-count">{t("panel.total", { n: list.total })}</span>
           )}
         </div>
         <div className="table-wrap">
-          {showingAi ? (
-            <Table<Device>
-              rowKey="serial_number"
-              columns={[proofColumn, ...columns]}
-              dataSource={aiResults!}
-              loading={aiLoading}
-              pagination={false}
-              scroll={TABLE_SCROLL}
-              rowSelection={{
-                selectedRowKeys: selectedKeys,
-                onChange: (keys) => setSelectedKeys(keys as string[]),
-              }}
-            />
-          ) : (
-            <Table<Device>
-              rowKey="serial_number"
-              columns={columns}
-              scroll={TABLE_SCROLL}
-              rowSelection={{
-                selectedRowKeys: selectedKeys,
-                onChange: (keys) => setSelectedKeys(keys as string[]),
-              }}
-              {...list.tableProps}
-            />
-          )}
+          <Table<Device>
+            rowKey="serial_number"
+            columns={columns}
+            scroll={TABLE_SCROLL}
+            rowSelection={{
+              selectedRowKeys: selectedKeys,
+              onChange: (keys) => setSelectedKeys(keys as string[]),
+            }}
+            {...list.tableProps}
+          />
         </div>
       </div>
 
@@ -444,13 +366,9 @@ export const DeviceMainScreen = ({
       {deleteTarget && (
         <ConfirmModal
           message={
-            list.trashed
-              ? `Permanently delete "${
-                  deleteTarget.name ?? deleteTarget.serial_number
-                }"? This cannot be undone.`
-              : `Move "${
-                  deleteTarget.name ?? deleteTarget.serial_number
-                }" to trash?`
+            t(list.trashed ? "device.confirm.delete" : "device.confirm.trash", {
+              name: deleteTarget.name ?? deleteTarget.serial_number,
+            })
           }
           onConfirm={() => handleDelete(deleteTarget.serial_number, list.trashed)}
           onCancel={() => setDeleteTarget(null)}
@@ -460,21 +378,19 @@ export const DeviceMainScreen = ({
       {bulkConfirm && (
         <ConfirmModal
           message={
-            list.trashed
-              ? `Permanently delete ${selectedKeys.length} selected device(s)? This cannot be undone.`
-              : `Move ${selectedKeys.length} selected device(s) to trash?`
+            t(
+              list.trashed
+                ? "device.confirm.bulkDelete"
+                : "device.confirm.bulkTrash",
+              { n: selectedKeys.length },
+            )
           }
           onConfirm={handleBulkDelete}
           onCancel={() => setBulkConfirm(false)}
         />
       )}
 
-      {showImport && <ImportDevicesModal onClose={() => {
-        setShowImport(false);
-        list.reload();
-      }} />}
 
-      <AssistantModal open={showAssistant} onClose={() => setShowAssistant(false)} />
     </>
   );
 };

@@ -1,19 +1,14 @@
 // Device API calls — one function per endpoint. Components import these
 // instead of calling fetch() directly. Template to clone for users.ts etc.
 import { request } from './client'
-import type { Device, DeviceCreate, DeviceRanked } from '../types'
+import type { Device, DeviceCreate } from '../types'
 import { pageQuery } from './paging'
 import type { Paged, PageParams } from './paging'
 
-// Natural-language semantic search, ranked by the local embedding service.
-// `rerank` re-sorts the top hits with the LLM (learns from marked feedback).
-export function semanticSearchDevices(q: string, limit = 30, rerank = false) {
-  return request<DeviceRanked[]>(
-    `/devices/semantic-search?q=${encodeURIComponent(q)}&limit=${limit}${
-      rerank ? '&rerank=true' : ''
-    }`,
-  )
-}
+// NOTE: there is no semanticSearchDevices here any more. The Smart-search UI was
+// removed in favour of as-you-type filtering (usePagedList). The backend endpoint
+// GET /devices/semantic-search still exists — Ask AI calls the same ranking path
+// internally as its `semantic_search` tool (be/routers/assistant.py).
 
 export function listDevices(userId?: string) {
   const query = userId ? `?user_id=${encodeURIComponent(userId)}` : ''
@@ -26,6 +21,12 @@ export function pageDevices(params: PageParams) {
 
 export function searchDevices(q: string) {
   return request<Device[]>(`/devices/search?q=${encodeURIComponent(q)}`)
+}
+
+// { column -> values already in use }, for the device form's autocompletes.
+// Case variants ("Asus"/"ASUS") are collapsed server-side to the common one.
+export function deviceSuggestions() {
+  return request<Record<string, string[]>>('/devices/suggestions')
 }
 
 export function restoreDevice(serialNumber: string) {

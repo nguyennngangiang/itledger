@@ -1,4 +1,5 @@
 import type { Device } from "../types";
+import { useT } from "../i18n/useT";
 
 export type AgingEntry = {
   device: Device;
@@ -15,15 +16,16 @@ export function AgingWatchlist({
   entries: AgingEntry[];
   totalAging: number;
 }) {
+  const { t } = useT();
   return (
     <div className="panel">
       <div className="panel-head">
-        <span className="panel-title">Aging watchlist</span>
-        <span className="panel-count">{totalAging} devices</span>
+        <span className="panel-title">{t("aging.title")}</span>
+        <span className="panel-count">{t("aging.count", { n: totalAging })}</span>
       </div>
       <div className="aging-list">
         {entries.length === 0 ? (
-          <div className="dash-empty">No purchase-date data yet</div>
+          <div className="dash-empty">{t("aging.empty")}</div>
         ) : (
           entries.map((e) => (
             <div className="aging-row" key={e.device.serial_number}>
@@ -34,7 +36,7 @@ export function AgingWatchlist({
                 <span className="aging-owner">{e.ownerLabel}</span>
               </span>
               <span className={`aging-age${e.years >= 6 ? " danger" : ""}`}>
-                {e.years.toFixed(1)} yrs
+                {t("aging.years", { n: e.years.toFixed(1) })}
               </span>
             </div>
           ))

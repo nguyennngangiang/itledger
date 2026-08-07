@@ -178,7 +178,7 @@ async def seed() -> None:
             await conn.execute(
                 "ALTER TABLE devices ADD COLUMN IF NOT EXISTS status VARCHAR(100)"
             )
-            for tbl in ("devices", "maintenance", "handovers"):
+            for tbl in ("devices", "maintenance", "handovers", "users"):
                 await conn.execute(
                     f"ALTER TABLE {tbl} ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMP"
                 )

@@ -22,14 +22,21 @@ be/                 FastAPI backend (Python 3.12, asyncpg)
   routers/          Thin HTTP layer — parse, call repo, map errors to status codes
   sql/schema.sql    Table DDL (run once by Postgres on first container start)
   seed.py           Idempotent sample-data seeder
-  docker-compose.yml  Postgres + API + AI containers
+  docker-compose.yml       Postgres + API (dev: hot reload, ports on 0.0.0.0)
+  docker-compose.prod.yml  LAN overlay: no reload, restart policy, loopback ports
 
 ai/                 Local semantic-search embedding service (runs on the HOST)
   main.py           FastAPI: POST /rank; OpenVINO on the Intel NPU (GPU/CPU fallback)
-  run-host.ps1      Launcher: creates the .venv and starts uvicorn on :8001
+  run-host.ps1      Launcher: creates the .venv and starts uvicorn on :8010
   requirements-host.txt  openvino + tokenizers + fastapi (Python 3.12)
-  .models/          bge-small-en-v1.5 ONNX + tokenizer (gitignored)
+  .models/          multilingual-e5-small ONNX + tokenizer (gitignored)
   .venv/            Python 3.12 venv (gitignored)
+
+deploy/             LAN deployment — see deploy/README.md
+  Caddyfile.site    The :10000 site block (SPA + /api proxy), imported by D:\LLM\caddy
+  start-itledger.ps1  Idempotent starter: containers + embedder + shared Caddy
+  register-task.ps1   One-time ITLedger-AutoStart registration (run elevated)
+  fetch-model.ps1     Downloads the e5-small ONNX + tokenizer
 
 fe/                 React 19 + Vite 8 + TypeScript, Ant Design 6, Tailwind 4
   src/api/          One module per resource; all fetches go through client.ts
@@ -43,7 +50,7 @@ fe/                 React 19 + Vite 8 + TypeScript, Ant Design 6, Tailwind 4
 **Backend + DB (Docker):** from `be/`, `docker compose up` starts Postgres
 (`5432`) and the API (`8000`, `/docs` for Swagger). The AI embedder runs on the
 **host**, not in Docker (see below) — the API reaches it at
-`AI_URL=http://host.docker.internal:8001`. Both containers hot-reload via the
+`AI_URL=http://host.docker.internal:8010`. Both containers hot-reload via the
 mounted repo. `schema.sql` only runs on a fresh volume — after schema edits,
 recreate: `docker compose down -v && docker compose up`.
 
@@ -55,15 +62,22 @@ the api container). Idempotent.
 see "LLM" below). It runs on the Windows host so it can use the Intel **NPU** (a
 container can't reach it). `npm run dev` from `fe/` launches it (or run it alone
 with `npm run dev:ai` /
-`powershell -ExecutionPolicy Bypass -File ai\run-host.ps1`). It serves `:8001`
-with a single `POST /rank`, compiling the **multilingual-e5-small** ONNX model
-with OpenVINO, preferring **NPU → GPU → CPU** (`EMBED_DEVICES`); the static
-[1, 128] reshape in `main.py` is what lets the NPU run it. It's **multilingual**
-(~100 languages incl. Vietnamese) — e5 needs the `query: ` / `passage: `
-prefixes (handled in `main.py`); pooling is attention-masked **mean** (not CLS).
-`/health` reports the bound `device`. Model files live in `ai/.models/e5-small/`
-(`model.onnx` + `tokenizer.json`, gitignored; a fresh machine downloads them from
-the `Xenova/multilingual-e5-small` HF repo — `onnx/model.onnx` + `tokenizer.json`).
+`powershell -ExecutionPolicy Bypass -File ai\run-host.ps1`). It serves **`:8010`**
+(`AI_PORT` overrides; **not** 8001 — on the deployment host that port belongs to
+the LLM stack's `llm-rag` container) with a single `POST /rank`, compiling the
+**multilingual-e5-small** ONNX model with OpenVINO, preferring
+**NPU → GPU → CPU** (`EMBED_DEVICES`, first device that can run it wins); the
+static [1, 128] reshape in `main.py` is what lets the NPU run it. It's
+**multilingual** (~100 languages incl. Vietnamese) — e5 needs the `query: ` /
+`passage: ` prefixes (handled in `main.py`); pooling is attention-masked **mean**
+(not CLS). `/health` reports the bound `device`. Model files live in
+`ai/.models/e5-small/` (`model.onnx` + `tokenizer.json`, gitignored; fetch them on
+a fresh machine with `deploy\fetch-model.ps1`, which pulls `onnx/model.onnx` +
+`tokenizer.json` from the `Xenova/multilingual-e5-small` HF repo).
+**On the current deployment host there is no Intel NPU** — `openvino` reports
+`['CPU']` (the GPU is an NVIDIA RTX 5060, which OpenVINO cannot target), so it
+binds CPU. That needs no configuration: `main.py` skips devices absent from
+`core.available_devices`. Don't "fix" a `device: "CPU"` in `/health` there.
 
 **LLM (generative — Ask AI, explain, rerank):** a separate **internal-network
 OpenAI-compatible** endpoint — a Caddy-fronted model server on `:8443` requiring
@@ -75,7 +89,7 @@ header. Config in `be/config.py` from `be/.env` (gitignored): `LLM_BASE_URL`
 server hosts three models (pick via `model`): **`llama3.1:8b`** — text chat, the
 one this app uses (`LLM_MODEL`); `qwen2.5vl:7b` — multimodal (reads images:
 OCR/tables), unused for now; `nomic-embed-text` — embeddings, unused (smart-search
-embeds with the app's **own NPU service** `ai/` e5-small on `:8001` — a *different*
+embeds with the app's **own NPU service** `ai/` e5-small on `:8010` — a *different*
 embedder, don't conflate). It also exposes Ollama-native (`/api/*`) and RAG
 (`/rag/chat` with citations) endpoints, unused by the app. **Full endpoint list +
 request/response examples (text, images, RAG, embeddings, curl/Python/PowerShell)
@@ -99,12 +113,43 @@ prompts — the shared model is **never** fine-tuned. If the LLM is unreachable,
 rerank falls back to semantic order and ask/explain return 503 (search still works).
 
 **Frontend + AI (`npm run dev`):** from `fe/`, `npm install` then `npm run dev`
-(http://localhost:5173) — this runs **Vite + the host AI embedder (:8001)**
+(http://localhost:5173) — this runs **Vite + the host AI embedder (:8010)**
 together via `concurrently` (see `dev:*` scripts). Vite calls the API at
 `VITE_API_URL` (default `http://localhost:8000`). So the full local stack is
 `docker compose up` (DB + API) plus `npm run dev` (web + AI). `npm run build`
 type-checks (`tsc -b`) then builds; run it to verify TS changes. `npm run lint`
 for ESLint.
+
+**LAN deployment (the office server) — read `deploy/README.md` before touching
+it.** The app is live on the internal network at **http://192.168.3.252:10000**,
+restored after reboot by the `ITLedger-AutoStart` scheduled task (AtStartup, plus a
+5-minute idempotent watchdog) running `deploy\start-itledger.ps1`. Three things
+there differ from the dev story above and *will* mislead you otherwise:
+
+1. **The Caddy that serves this app is not ours.** It's the `D:\LLM\caddy\caddy.exe`
+   process that fronts the LLM stack on `:8443`; it also serves `:10000` because
+   `D:\LLM\caddy\Caddyfile` ends with `import "D:/itledger/deploy/Caddyfile.site"`.
+   One process, two sites — so `deploy/Caddyfile.site` is ours but the file that
+   loads it is not, and that Caddyfile's `admin off` means **`caddy reload` does not
+   work** (stop + restart instead). Caddy serves `fe/dist` statically and proxies
+   `/api/*` → `127.0.0.1:8000`, stripping the prefix, so prod runs same-origin and
+   **CORS is never exercised** (`fe/.env.production` sets `VITE_API_URL=/api`).
+2. **`docker compose` must run *inside* WSL there**, never from Windows: the
+   Windows `DOCKER_HOST` points at a *different* engine than the `Ubuntu-24.04`
+   distro that hosts these containers, and the api service bind-mounts the repo, so
+   the daemon has to see it as `/mnt/d/itledger`. Use the `-f docker-compose.yml -f
+   docker-compose.prod.yml` pair; the overlay needs `!override` on `ports` because
+   Compose *appends* list values when merging.
+3. **Python 3.12 is vendored at `.python312\`** (gitignored, portable NuGet build)
+   because MSI installs are blocked by system policy on that host — the python.org
+   installer exits `1625` and there is no `winget`. `ai/run-host.ps1` builds the
+   venv from it; `$env:ITLEDGER_PYTHON` overrides.
+
+Beware the Caddy directive-order trap if you edit `deploy/Caddyfile.site`: Caddy
+sorts directives by its own order, not source order, and `try_files` sorts *before*
+`handle`. A bare site-level `try_files` therefore rewrites `/api/health` to
+`/index.html` before `handle_path /api/*` can match, and every API call silently
+returns the SPA. Both handlers must be `handle` blocks.
 
 ## Conventions
 
@@ -124,6 +169,14 @@ for ESLint.
   are matched to fields by normalized header name.
 - **Paginated tables.** `GET /<resource>/page` returns `{rows, total}`; the
   `usePagedList` hook drives an Ant `<Table>` (sort/search/paginate/trash).
+- **Keyword search reaches the owner.** A row stores its owner as an
+  `employee_code` FK, so plain `ILIKE` over the row's own columns can only match
+  the *code* — typing a person's name found nothing until `owner_match()` /
+  `device_owner_match()` (`be/repositories/__init__.py`) existed. Use those
+  helpers in any new search predicate: they `EXISTS`-join `users` (never `JOIN`,
+  which would break the `count(*)` total) and wrap the name in `unaccent()` so
+  "van" finds "Vân". Vietnamese text columns are `unaccent()`-wrapped for the
+  same reason; the extension is created in `be/sql/schema.sql`.
 - **Semantic search.** `GET /<resource>/semantic-search?q=` exists for
   **devices, maintenance and handovers**. Each flattens an active row into a
   natural-language sentence (device: specs + owner team + repair count;
@@ -167,3 +220,28 @@ always has a reduced-motion fallback (WCAG 2.1 AA).
 - Root-level `REAL-DATA.xlsx`, `import_data.json`, `_build_import.mjs`, and
   `be/import_real.py` are one-off scaffolding used to bootstrap real data; the
   in-app Import button supersedes them for normal use. Data files are gitignored.
+- **Employee names in `REAL-DATA.xlsx` are not trustworthy per-cell**, so
+  `_build_import.mjs` treats every name as a *candidate* and settles each code
+  **after** all sheets are read — precedence comes from source trust, never sheet
+  order (an as-you-go rule let whichever sheet ran first win, which is how
+  VPHN216 became "Nguyễn Thị Vân"). The ranking, and why:
+  1. **Handover History** — pairs a full name with that person's own code in
+     adjacent cells. Most reliable.
+  2. **`Devices` "Remark"** — holds most of the workbook's full names (~92 of 117
+     values), but on some rows it holds the *previous* holder's name or a plain
+     note, so it must never outrank Handover.
+  3. **`Devices` "Name"** — always the right person but the worse rendering
+     (nicknames, unaccented short forms like "Bui Thuy").
+
+  A one-word value is a nickname, not a name, and is dropped rather than stored.
+  Case-only variants are merged; `NOT_A_NAME` rejects note-shaped cells. The build
+  writes `import_names_report.json` beside `import_data.json`: `conflicts` (one
+  code, two different people — needs a human), `variants` (same person, merged),
+  `missing` (nickname only). Extend the ranking rather than special-casing rows.
+- **To correct names in a live DB, use `python -m be.fix_user_names`** (dry run;
+  `--apply` writes) — **not** `be.import_real`, which `TRUNCATE`s all five tables
+  and would discard everything entered in the app since the first import. It only
+  ever writes `users.name`, never adds or deletes users, and dumps the table to
+  `users_before_name_fix.json` before its first write. A `conflicts` code is only
+  written if `NAME_DECISIONS` in that script records a human's ruling *and* the
+  workbook still resolves to it; record new rulings there with who and when.

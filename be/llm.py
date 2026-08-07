@@ -180,6 +180,67 @@ async def explain(query: str, document: str) -> str:
         raise HTTPException(503, f"LLM explain unavailable: {e}")
 
 
+HANDOVER_READER_SYSTEM = """\
+You read ONE Vietnamese/English IT handover record ("BIÊN BẢN BÀN GIAO / HANDOVER
+MINUTES") that has been flattened to text, and return it as JSON.
+
+The record is a FORM, not a table. Labels sit in one cell and their value in a
+cell to the right, e.g. `B10 "Trịnh Thế Hưng"` is the value of `A10 "Bên A/ Party A:"`.
+Labels you will meet: `Địa điểm/ Place`, `Bên A/ Party A`, `Bên B/ Party B`,
+`Mã NV/ Code`, `Bộ phận/ Dept.`, `Chức vụ/ Position`. Below `Nội dung bàn giao/
+Contents` there IS a small table whose header row contains `SERIAL`; every row
+under it with a number in the `No.` column is one handed-over item.
+
+Return EXACTLY this shape:
+{"handover_date":"YYYY-MM-DD","place":"...",
+ "party_a":{"name":"","code":"","dept":"","position":""},
+ "party_b":{"name":"","code":"","dept":"","position":""},
+ "items":[{"no":1,"item":"","quantity":1,"detail":"","serial":"","note":"",
+           "device":{"type":"","brand":"","cpu":"","ram":"","storage":"","name":""}}]}
+
+Rules:
+- COPY values verbatim from the text. Never invent, translate, correct spelling,
+  or fill a blank with something plausible. Use null for anything not present.
+- `handover_date`: use the ISO date in square brackets after a date cell if there
+  is one (e.g. `D5 "Tuesday, July 21, 2026" [2026-07-21]` → "2026-07-21").
+- One object per `No.` row — no more, no fewer. A record with a single item is
+  normal and complete; do not invent a second row.
+- `device` splits the `Chi tiết/ Detail` text into parts, each part still a
+  substring of the text: "HP Laptop core i3 ram 8gb SSD 256gb" → type "Laptop",
+  brand "HP", cpu "core i3", ram "8gb", storage "SSD 256gb". Omit what isn't there.
+- Do NOT decide who gave and who received, and do NOT output any direction,
+  from/to, or flow field. Bên A is not necessarily the giver. That is decided
+  elsewhere from the ledger's own history.
+- Output only the JSON object. No prose, no markdown fence."""
+
+
+async def read_handover_minutes(sheet_text: str) -> dict:
+    """Read one flattened handover record into structured fields.
+
+    Returns {} on any failure (unreachable model, non-JSON reply) — the caller
+    turns that into a clear 503, because unlike rerank there is no useful
+    fallback: if the file can't be read there is nothing to import.
+
+    The result is NOT trusted: every string it returns is checked back against
+    the source text by the caller (routers/imports._verify_against_source) before
+    anything reaches the database.
+    """
+    if not (sheet_text or "").strip():
+        return {}
+    try:
+        raw = await _chat(
+            HANDOVER_READER_SYSTEM,
+            f"Handover record:\n{sheet_text}",
+            want_json=True,
+            temperature=0.0,
+            timeout=180,
+        )
+        parsed = json.loads(raw)
+    except (httpx.HTTPError, json.JSONDecodeError, KeyError, TypeError):
+        return {}
+    return parsed if isinstance(parsed, dict) else {}
+
+
 async def rerank(
     query: str,
     candidates: list[dict],

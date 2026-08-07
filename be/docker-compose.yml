@@ -30,8 +30,9 @@ services:
       DATABASE_URL: postgresql://postgres:poop@db:5432/itledger
       CORS_ORIGINS: http://localhost:5173
       # The embedding + LLM service runs on the host (see note above); reach it
-      # from inside the container via host.docker.internal.
-      AI_URL: http://host.docker.internal:8001
+      # from inside the container via host.docker.internal. Port 8010, not 8001 —
+      # see ai/run-host.ps1.
+      AI_URL: http://host.docker.internal:8010
     extra_hosts:
       - "host.docker.internal:host-gateway"
     ports:

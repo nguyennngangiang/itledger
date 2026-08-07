@@ -1,5 +1,6 @@
 import { useEffect, useRef } from "react";
 import anime from "animejs";
+import { useT } from "../i18n/useT";
 
 /**
  * Cute trash-bin toggle that replaces the Active/Trash segmented control.
@@ -14,6 +15,7 @@ export function TrashToggle({
   trashed: boolean;
   onToggle: (trashed: boolean) => void;
 }) {
+  const { t } = useT();
   const lidRef = useRef<SVGGElement>(null);
   const binRef = useRef<SVGSVGElement>(null);
   const first = useRef(true);
@@ -75,7 +77,7 @@ export function TrashToggle({
       type="button"
       className={`trash-toggle${trashed ? " open" : ""}`}
       onClick={() => onToggle(!trashed)}
-      title={trashed ? "Back to active list" : "Open trash"}
+      title={t(trashed ? "trash.toActive" : "trash.toTrash")}
       aria-pressed={trashed}
     >
       <svg
@@ -104,7 +106,7 @@ export function TrashToggle({
         <path d="M5.5 6.5l.9 12.8A2 2 0 0 0 8.4 21h7.2a2 2 0 0 0 2-1.7l.9-12.8" />
         <path d="M10 11v5M14 11v5" />
       </svg>
-      <span className="trash-toggle-label">{trashed ? "Back" : "Trash"}</span>
+      <span className="trash-toggle-label">{t(trashed ? "trash.back" : "trash.trash")}</span>
     </button>
   );
 }

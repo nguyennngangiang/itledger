@@ -9,8 +9,9 @@ from pydantic import BaseModel
 from ..db import get_pool
 from ..documents import handover_document
 from ..search import rank
-from .. import llm
+from .. import handover_import, llm
 from ..models.handover import HandoverCreate, HandoverOut, HandoverUpdate
+from ..repositories import distinct_values
 from ..repositories import handover as repo
 from ..repositories import device as device_repo
 from ..repositories import feedback as feedback_repo
@@ -34,8 +35,24 @@ class HandoverRanked(HandoverOut):
     reason: str | None = None
 
 
+def _reject_meaningless(from_user_id: str | None, to_user_id: str | None) -> None:
+    """A handover has to move the machine between two different people.
+
+    The live ledger carries thirteen rows that do neither — seven with no
+    recipient at all and six where a person hands a device to themselves. They
+    came in through the original workbook import and say nothing about where the
+    machine went, while still counting as the device's latest event. Refuse to
+    add more.
+    """
+    if not (to_user_id or "").strip():
+        raise HTTPException(422, "Người nhận không được để trống.")
+    if (from_user_id or "").strip() == (to_user_id or "").strip():
+        raise HTTPException(422, "Người giao và người nhận phải khác nhau.")
+
+
 @router.post("", response_model=HandoverOut, status_code=201)
 async def create_handover(handover: HandoverCreate, pool=Depends(get_pool)):
+    _reject_meaningless(handover.from_user_id, handover.to_user_id)
     try:
         return await repo.create(pool, handover)
     except DuplicateError as e:
@@ -83,6 +100,30 @@ async def page_handovers(
         q=q,
     )
     return {"rows": rows, "total": total}
+
+
+@router.get("/suggestions", response_model=dict[str, list[str]])
+async def handover_suggestions(pool=Depends(get_pool)):
+    """Values already used, per column — feeds the handover form's Reason
+    autocomplete. The form used to offer a hardcoded list only, so the phrasing the
+    team actually writes ("Device replacement", "Trả về kho") never surfaced.
+    Declared before /{handover_id} so "suggestions" isn't read as an id.
+
+    Also carries `return_phrases`, so the form can recognise a return without
+    keeping its own copy of the wording — the copy it used to keep had drifted and
+    no longer matched what the backend acted on. The form pairs every phrase with
+    the recipient's team, exactly as `store_recipient` does, so it gets the whole
+    list including the both-directions ones like "Replacement".
+    """
+    return {
+        **{
+            field: await distinct_values(
+                pool, "handovers", field, repo.SUGGESTABLE_FIELDS
+            )
+            for field in sorted(repo.SUGGESTABLE_FIELDS)
+        },
+        "return_phrases": list(handover_import.RETURN_WHEN_TO_IT),
+    }
 
 
 @router.get("/semantic-search", response_model=list[HandoverRanked])
@@ -146,6 +187,15 @@ async def update_handover(
     handover: HandoverUpdate,
     pool=Depends(get_pool),
 ):
+    # PATCH is partial, so check the values the row will END UP with.
+    current = await repo.get(pool, handover_id)
+    if current is None:
+        raise HTTPException(404, f"Handover not found: {handover_id}")
+    sent = handover.model_dump(exclude_unset=True)
+    _reject_meaningless(
+        sent.get("from_user_id", current["from_user_id"]),
+        sent.get("to_user_id", current["to_user_id"]),
+    )
     try:
         updated = await repo.update(pool, handover_id, handover)
     except ForeignKeyError as e:

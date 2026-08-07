@@ -9,6 +9,8 @@ import { fileToAttachment } from "../../lib/files";
 import { SparklesIcon, UploadIcon } from "../icons";
 import { useSessionState } from "../../lib/useSessionState";
 import { getSessionId } from "../../lib/session";
+import { ImportModal } from "./ImportModal";
+import { useT } from "../../i18n/useT";
 
 type Msg = {
   role: "user" | "ai";
@@ -18,10 +20,10 @@ type Msg = {
 };
 
 const SUGGESTIONS = [
-  "Which laptops are oldest and due for replacement?",
-  "How many devices is each team assigned?",
-  "List the devices repaired the most.",
-  "What's in stock and unassigned right now?",
+  "ai.suggest.oldest",
+  "ai.suggest.perTeam",
+  "ai.suggest.mostRepaired",
+  "ai.suggest.inStock",
 ];
 
 // Files the assistant can read (via the server's /rag/extract): images, PDF,
@@ -47,6 +49,7 @@ export function AssistantModal({
   open: boolean;
   onClose: () => void;
 }) {
+  const { t } = useT();
   const [q, setQ] = useState("");
   // Persist the conversation for this browser-tab session, so it survives page
   // reloads and navigating away from the Devices tab (this modal remounts). A new
@@ -57,6 +60,11 @@ export function AssistantModal({
   );
   const [loading, setLoading] = useState(false);
   const [files, setFiles] = useState<File[]>([]);
+  // The files from the last answered question, kept so they can be handed to the
+  // importer. Not in `msgs`: that is sessionStorage-backed and a File cannot be
+  // serialised, so the hand-off only survives while the panel is mounted.
+  const [answered, setAnswered] = useState<File[]>([]);
+  const [importing, setImporting] = useState<File | null>(null);
   const [devices, setDevices] = useState<Device[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -74,15 +82,15 @@ export function AssistantModal({
     const next = [...files];
     for (const f of Array.from(picked)) {
       if (!isAccepted(f)) {
-        toast.error(`Không hỗ trợ định dạng: ${f.name}`);
+        toast.error(t("ai.err.unsupported", { name: f.name }));
         continue;
       }
       if (f.size > MAX_SIZE) {
-        toast.error(`File quá lớn (>15MB): ${f.name}`);
+        toast.error(t("ai.err.tooBig", { name: f.name }));
         continue;
       }
       if (next.length >= MAX_FILES) {
-        toast.error(`Tối đa ${MAX_FILES} file mỗi lần.`);
+        toast.error(t("ai.err.tooMany", { max: MAX_FILES }));
         break;
       }
       next.push(f);
@@ -109,7 +117,7 @@ export function AssistantModal({
     try {
       const attachments = await Promise.all(pending.map(fileToAttachment));
       const { answer, tool_calls, elapsed_ms } = await askAssistant(
-        query || "Đọc và tóm tắt file đính kèm.",
+        query || t("ai.readAttachment"),
         history,
         attachments,
       );
@@ -122,8 +130,12 @@ export function AssistantModal({
           elapsedMs: elapsed_ms ?? 0,
         },
       ]);
+      // Offer the hand-off. Ask AI itself stays read-only — its three tools are
+      // all SELECTs — so writing goes through the import wizard, where the plan
+      // is reviewed before anything is committed.
+      setAnswered(pending);
     } catch (e) {
-      toast.error("Assistant failed: " + e);
+      toast.error(t("ai.failed", { error: String(e) }));
       setMsgs((m) => [
         ...m,
         {
@@ -139,7 +151,7 @@ export function AssistantModal({
 
   return (
     <Drawer
-      title="Ask AI — grounded in your fleet"
+      title={t("ai.title")}
       placement="right"
       size={460}
       open={open}
@@ -162,7 +174,7 @@ export function AssistantModal({
         {msgs.length > 0 && (
           <div className="assistant-bar">
             <Button size="small" onClick={() => setMsgs([])} disabled={loading}>
-              New chat
+              {t("ai.newChat")}
             </Button>
           </div>
         )}
@@ -170,11 +182,7 @@ export function AssistantModal({
           {msgs.length === 0 && (
             <div className="assistant-empty">
               <SparklesIcon size={22} />
-              <p>
-                Ask anything about your devices, or attach a file (image, PDF,
-                Word, Excel…) and I'll read it and answer — grounded in your
-                fleet's own data.
-              </p>
+              <p>{t("ai.intro")}</p>
               <div className="assistant-suggestions">
                 {SUGGESTIONS.map((s) => (
                   <button
@@ -199,7 +207,7 @@ export function AssistantModal({
                     </span>
                   ))}
                   <span className="assistant-trace-meta">
-                    {m.toolCalls.length} tool call{m.toolCalls.length === 1 ? "" : "s"}
+                    {t("ai.toolCalls", { n: m.toolCalls.length })}
                     {m.elapsedMs ? ` · ${(m.elapsedMs / 1000).toFixed(1)}s` : ""}
                   </span>
                 </div>
@@ -211,6 +219,26 @@ export function AssistantModal({
               <div className="assistant-bubble assistant-thinking">
                 thinking…
               </div>
+            </div>
+          )}
+          {/* Reading a file and putting it in the ledger are different acts. The
+              answer above is the reading; this is the offer to do the other one,
+              through the wizard that shows every conflict first. */}
+          {!loading && answered.length > 0 && (
+            <div className="assistant-handoff">
+              {answered.map((f, i) => (
+                <Button
+                  key={i}
+                  size="small"
+                  type="primary"
+                  onClick={() => setImporting(f)}
+                >
+                  {t("ai.handoff", { name: f.name })}
+                </Button>
+              ))}
+              <Button size="small" type="text" onClick={() => setAnswered([])}>
+                {t("ai.handoffSkip")}
+              </Button>
             </div>
           )}
         </div>
@@ -243,12 +271,12 @@ export function AssistantModal({
             icon={<UploadIcon size={16} />}
             onClick={() => fileInputRef.current?.click()}
             disabled={loading || files.length >= MAX_FILES}
-            title="Attach files (image, PDF, Word, Excel…)"
+            title={t("ai.attach")}
           />
           <Input.TextArea
             value={q}
             onChange={(e) => setQ(e.target.value)}
-            placeholder="e.g. Which Dell machines are over 5 years old?"
+            placeholder={t("ai.placeholder")}
             autoSize={{ minRows: 1, maxRows: 4 }}
             onPressEnter={(e) => {
               e.preventDefault();
@@ -261,10 +289,19 @@ export function AssistantModal({
             onClick={() => ask(q)}
             icon={<SparklesIcon size={16} />}
           >
-            Ask
+            {t("ai.ask")}
           </Button>
         </div>
       </div>
+
+      {importing && (
+        <ImportModal
+          kind="auto"
+          initialFile={importing}
+          onClose={() => setImporting(null)}
+          onDone={() => setAnswered([])}
+        />
+      )}
     </Drawer>
   );
 }

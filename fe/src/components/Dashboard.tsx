@@ -15,7 +15,7 @@ import { Pie, Bar } from "react-chartjs-2";
 import { listDevices } from "../api/devices";
 import { listMaintenance } from "../api/maintenance";
 import { listHandovers } from "../api/handovers";
-import { listUsers } from "../api/users";
+import { listUsersIncludingDeleted } from "../api/users";
 import type { Device, Maintenance, Handover } from "../types";
 import { DEVICE_STATUS_META, DEVICE_STATUS_ORDER } from "../types";
 import { DeviceIcon } from "./icons";
@@ -24,6 +24,7 @@ import { countByStatus } from "../lib/deviceStats";
 import { ActivityFeed, type ActivityItem } from "./ActivityFeed";
 import { AgingWatchlist, type AgingEntry } from "./AgingWatchlist";
 import { RepairSpendPanel } from "./RepairSpendPanel";
+import { useT } from "../i18n/useT";
 
 const MS_PER_YEAR = 365.25 * 24 * 60 * 60 * 1000;
 
@@ -42,10 +43,12 @@ const CAT_PALETTE = [
   "#c4b5fd", "#7dd3fc", "#bef264", "#fda4af", "#5eead4",
 ];
 
-function countBy(devices: Device[], field: keyof Device) {
+/** Module scope, so the label for a blank cell is passed in rather than looked
+ * up — same reason describeIssue() takes `t`. */
+function countBy(devices: Device[], field: keyof Device, unknown: string) {
   const map = new Map<string, number>();
   for (const d of devices) {
-    const key = (d[field] as string | null)?.trim() || "Unknown";
+    const key = (d[field] as string | null)?.trim() || unknown;
     map.set(key, (map.get(key) ?? 0) + 1);
   }
   return [...map.entries()]
@@ -87,6 +90,7 @@ const pieOptions = {
 };
 
 export const Dashboard = ({ refreshKey = 0 }: { refreshKey?: number }) => {
+  const { t } = useT();
   const [devices, setDevices] = useState<Device[]>([]);
   const [maintenance, setMaintenance] = useState<Maintenance[]>([]);
   const [handovers, setHandovers] = useState<Handover[]>([]);
@@ -102,7 +106,9 @@ export const Dashboard = ({ refreshKey = 0 }: { refreshKey?: number }) => {
           listDevices(),
           listMaintenance(),
           listHandovers(),
-          listUsers(),
+          // Includes trashed staff so the activity feed and watchlist keep
+          // naming people who have since left.
+          listUsersIncludingDeleted(),
         ]);
         setDevices(ds);
         setMaintenance(ms);
@@ -126,9 +132,10 @@ export const Dashboard = ({ refreshKey = 0 }: { refreshKey?: number }) => {
 
   const statusCounts = useMemo(() => countByStatus(devices), [devices]);
 
-  const byBrand = useMemo(() => countBy(devices, "brand"), [devices]);
-  const byCpu = useMemo(() => countBy(devices, "cpu"), [devices]);
-  const byOs = useMemo(() => countBy(devices, "os"), [devices]);
+  const unknown = t("dash.unknown");
+  const byBrand = useMemo(() => countBy(devices, "brand", unknown), [devices, unknown]);
+  const byCpu = useMemo(() => countBy(devices, "cpu", unknown), [devices, unknown]);
+  const byOs = useMemo(() => countBy(devices, "os", unknown), [devices, unknown]);
 
   const devicesById = useMemo(
     () => Object.fromEntries(devices.map((d) => [d.serial_number, d])),
@@ -145,11 +152,7 @@ export const Dashboard = ({ refreshKey = 0 }: { refreshKey?: number }) => {
         id: `reg-${d.serial_number}`,
         date: d.buy_date,
         kind: "registered",
-        text: (
-          <>
-            <b>{d.name ?? d.serial_number}</b> added to the ledger
-          </>
-        ),
+        text: t("dash.added", { device: d.name ?? d.serial_number }),
       });
     }
     for (const m of maintenance) {
@@ -159,12 +162,10 @@ export const Dashboard = ({ refreshKey = 0 }: { refreshKey?: number }) => {
         id: `mnt-${m.maintenance_id}`,
         date: m.maintenance_date,
         kind: "repair",
-        text: (
-          <>
-            <b>{device?.name ?? m.device_id ?? "Unknown device"}</b> serviced
-            {m.part ? <> — {m.part}</> : null}
-          </>
-        ),
+        text: t(m.part ? "dash.servicedPart" : "dash.serviced", {
+          device: device?.name ?? m.device_id ?? t("detail.unknownDevice"),
+          part: m.part ?? "",
+        }),
       });
     }
     for (const h of handovers) {
@@ -175,17 +176,16 @@ export const Dashboard = ({ refreshKey = 0 }: { refreshKey?: number }) => {
         id: `hnd-${h.handover_id}`,
         date: h.handover_date,
         kind: "handover",
-        text: (
-          <>
-            <b>{device?.name ?? h.device_id ?? "Unknown device"}</b> handed to{" "}
-            {to.name} <span className="text-faint">({to.team})</span>
-            {h.reason ? <> — {h.reason}</> : null}
-          </>
-        ),
+        text: t(h.reason ? "dash.handedReason" : "dash.handed", {
+          device: device?.name ?? h.device_id ?? t("detail.unknownDevice"),
+          name: to.name,
+          team: to.team,
+          reason: h.reason ?? "",
+        }),
       });
     }
     return items.sort((a, b) => b.date.localeCompare(a.date)).slice(0, 8);
-  }, [devices, maintenance, handovers, devicesById, users]);
+  }, [devices, maintenance, handovers, devicesById, users, t]);
 
   const mostRecentActivityDate = useMemo(() => {
     const dates = [
@@ -291,7 +291,7 @@ export const Dashboard = ({ refreshKey = 0 }: { refreshKey?: number }) => {
   };
 
   const statCards = [
-    { label: "Total Devices", value: devices.length, tone: "indigo", icon: true },
+    { label: t("dash.totalDevices"), value: devices.length, tone: "indigo", icon: true },
     { label: DEVICE_STATUS_META.active.label, value: statusCounts.active, tone: "emerald" },
     { label: DEVICE_STATUS_META.in_stock.label, value: statusCounts.in_stock, tone: "slate" },
     { label: DEVICE_STATUS_META.maintaining.label, value: statusCounts.maintaining, tone: "amber" },
@@ -299,9 +299,9 @@ export const Dashboard = ({ refreshKey = 0 }: { refreshKey?: number }) => {
   ];
 
   const charts = [
-    { title: "Devices by brand", unit: "brands", data: byBrand },
-    { title: "Devices by CPU", unit: "types", data: byCpu },
-    { title: "Devices by OS", unit: "types", data: byOs },
+    { title: t("dash.byBrand"), unit: t("dash.unit.brands"), data: byBrand },
+    { title: t("dash.byCpu"), unit: t("dash.unit.types"), data: byCpu },
+    { title: t("dash.byOs"), unit: t("dash.unit.types"), data: byOs },
   ];
 
   return (
@@ -309,7 +309,7 @@ export const Dashboard = ({ refreshKey = 0 }: { refreshKey?: number }) => {
       <div className="dash-header">
         <span className="dash-live-pill">
           <span className="dash-live-dot" />
-          Ledger current — last entry: {formatDate(mostRecentActivityDate)}
+          {t("dash.live", { date: formatDate(mostRecentActivityDate) })}
         </span>
       </div>
 
@@ -347,7 +347,7 @@ export const Dashboard = ({ refreshKey = 0 }: { refreshKey?: number }) => {
                 {c.data.length ? (
                   <Pie data={pieData(c.data)} options={pieOptions} />
                 ) : (
-                  <div className="dash-empty">No data yet</div>
+                  <div className="dash-empty">{t("dash.noData")}</div>
                 )}
               </div>
             </div>
@@ -356,15 +356,15 @@ export const Dashboard = ({ refreshKey = 0 }: { refreshKey?: number }) => {
 
         <div className="panel">
           <div className="panel-head">
-            <span className="panel-title">Devices by status</span>
-            <span className="panel-count">{devices.length} total</span>
+            <span className="panel-title">{t("dash.byStatus")}</span>
+            <span className="panel-count">{t("dash.total", { n: devices.length })}</span>
           </div>
           <div className="chart-body">
             <div className="chart-canvas">
               {devices.length ? (
                 <Bar data={statusData} options={statusOptions} />
               ) : (
-                <div className="dash-empty">No data yet</div>
+                <div className="dash-empty">{t("dash.noData")}</div>
               )}
             </div>
           </div>

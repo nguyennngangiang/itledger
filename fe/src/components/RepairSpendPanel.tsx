@@ -1,5 +1,6 @@
 import { useMemo } from "react";
 import type { Maintenance } from "../types";
+import { useT } from "../i18n/useT";
 
 function monthKey(iso: string) {
   return iso.slice(0, 7); // "YYYY-MM"
@@ -13,6 +14,7 @@ function monthLabel(key: string) {
 /** Dashboard "story" widget: real repair spend from maintenance.cost_vnd,
  * grouped by month (last 6) and by part (last 3 months = "this quarter"). */
 export function RepairSpendPanel({ maintenance }: { maintenance: Maintenance[] }) {
+  const { t } = useT();
   const { series, max, quarterTotal, quarterCount, topParts } = useMemo(() => {
     const now = new Date();
     const months: string[] = [];
@@ -53,15 +55,15 @@ export function RepairSpendPanel({ maintenance }: { maintenance: Maintenance[] }
   return (
     <div className="panel">
       <div className="panel-head">
-        <span className="panel-title">Repair spend</span>
-        <span className="panel-count">6 months</span>
+        <span className="panel-title">{t("spend.title")}</span>
+        <span className="panel-count">{t("spend.window")}</span>
       </div>
       <div className="repair-spend-body">
         <div className="repair-spend-total">
           ₫{(quarterTotal / 1_000_000).toFixed(1)}M
         </div>
         <div className="repair-spend-sub">
-          spent this quarter · {quarterCount} repair{quarterCount === 1 ? "" : "s"}
+          {t("spend.sub", { n: quarterCount })}
         </div>
         <div className="repair-spend-bars">
           {series.map((s, i) => (
@@ -76,10 +78,10 @@ export function RepairSpendPanel({ maintenance }: { maintenance: Maintenance[] }
         </div>
         {topParts.length > 0 && (
           <div className="repair-spend-parts">
-            Top part this period:{" "}
+            {t("spend.topPart")}
             {topParts.map(([part, count], i) => (
               <span key={part}>
-                {i > 0 && ", then "}
+                {i > 0 && t("spend.then")}
                 <b>{part}</b> ({count})
               </span>
             ))}

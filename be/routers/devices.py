@@ -8,6 +8,7 @@ from pydantic import BaseModel
 
 from ..db import get_pool
 from ..documents import device_document
+from ..repositories import distinct_values
 from ..search import rank
 from .. import llm
 from ..models.device import DeviceCreate, DeviceOut, DeviceUpdate, DeviceDelete
@@ -100,9 +101,29 @@ async def page_devices(
 async def search_devices(q: str, pool=Depends(get_pool)):
     return await repo.search(pool, q)
 
+@router.get("/suggestions", response_model=dict[str, list[str]])
+async def device_suggestions(pool=Depends(get_pool)):
+    """Values already in use, per column — feeds the device form's autocompletes
+    so suggestions reflect the real fleet instead of a hardcoded list.
+
+    Returns every suggestable column in one response: the form needs eight of
+    them and opens often, so this is one round-trip instead of eight. Declared
+    before /{serial_number} so "suggestions" isn't read as a serial number.
+    """
+    return {
+        field: await distinct_values(pool, "devices", field, repo.SUGGESTABLE_FIELDS)
+        for field in sorted(repo.SUGGESTABLE_FIELDS)
+    }
+
+
 @router.get("/filter", response_model=list[DeviceOut])
 async def filter_devices(field: str, value: str, pool=Depends(get_pool)):
-    return await repo.filter_devices(pool, field, value)
+    try:
+        return await repo.filter_devices(pool, field, value)
+    except ValueError as e:
+        # Column outside FILTERABLE_FIELDS. The allowlist already stops it from
+        # reaching SQL; this turns the refusal into a 400 instead of a 500.
+        raise HTTPException(400, str(e))
 
 
 @router.get("/semantic-search", response_model=list[DeviceRanked])

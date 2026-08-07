@@ -24,11 +24,3 @@ export function askAssistant(
     },
   )
 }
-
-// One-liner explaining why a record matched a smart-search query (proof card).
-export function explainMatch(query: string, document: string) {
-  return request<{ explanation: string }>('/assistant/explain', {
-    method: 'POST',
-    body: JSON.stringify({ query, document }),
-  })
-}

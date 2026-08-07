@@ -84,6 +84,47 @@ export const UploadIcon = (p: IconProps) => (
   </Base>
 );
 
+export const ChevronDownIcon = (p: IconProps) => (
+  <Base {...p}>
+    <path d="m6 9 6 6 6-6" />
+  </Base>
+);
+
+export const CheckIcon = (p: IconProps) => (
+  <Base {...p}>
+    <path d="M20 6 9 17l-5-5" />
+  </Base>
+);
+
+export const XIcon = (p: IconProps) => (
+  <Base {...p}>
+    <path d="M18 6 6 18" />
+    <path d="m6 6 12 12" />
+  </Base>
+);
+
+export const DownloadIcon = (p: IconProps) => (
+  <Base {...p}>
+    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+    <path d="M12 15V3M7 10l5 5 5-5" />
+  </Base>
+);
+
+export const GlobeIcon = (p: IconProps) => (
+  <Base {...p}>
+    <circle cx="12" cy="12" r="9" />
+    <path d="M3 12h18" />
+    <path d="M12 3a15 15 0 0 1 0 18a15 15 0 0 1 0-18" />
+  </Base>
+);
+
+export const BellIcon = (p: IconProps) => (
+  <Base {...p}>
+    <path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9" />
+    <path d="M13.7 21a2 2 0 0 1-3.4 0" />
+  </Base>
+);
+
 export const TrashIcon = (p: IconProps) => (
   <Base {...p}>
     <path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m2 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6" />
@@ -131,23 +172,6 @@ export const InfoIcon = (p: IconProps) => (
     <circle cx="12" cy="12" r="9" />
     <path d="M12 11v5" />
     <path d="M12 8h.01" />
-  </Base>
-);
-
-// "Why did this match?" — a magnifier with a check, distinct from the plain
-// SearchIcon and the circle-i InfoIcon. Used on smart-search results to reveal
-// the evidence (the sentence the AI ranked) behind a device's relevance score.
-export const ProveIcon = (p: IconProps) => (
-  <Base {...p}>
-    <circle cx="11" cy="11" r="7" />
-    <path d="m21 21-4.3-4.3" />
-    <path d="m8.4 11 1.9 1.9 3.3-3.6" />
-  </Base>
-);
-
-export const CheckIcon = (p: IconProps) => (
-  <Base {...p}>
-    <path d="M20 6 9 17l-5-5" />
   </Base>
 );
 

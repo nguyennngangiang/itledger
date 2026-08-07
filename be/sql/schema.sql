@@ -3,7 +3,15 @@ CREATE EXTENSION IF NOT EXISTS unaccent;
 CREATE TABLE users (
     employee_code VARCHAR(100) PRIMARY KEY,
     name VARCHAR(100),
-    team VARCHAR(100)
+    team VARCHAR(100),
+    -- Employment status. Distinct from `deleted_at`: someone who has left the
+    -- company is 'retired' but still a real person — their handover history has
+    -- to keep reading, and the report of who still holds a device depends on
+    -- them staying visible. `deleted_at` is for rows entered by mistake.
+    -- Also applied at app startup for already-running databases (see
+    -- be/repositories/user.py USER_MIGRATIONS_DDL).
+    status VARCHAR(16) NOT NULL DEFAULT 'active',
+    deleted_at TIMESTAMP
 );
 
 CREATE TABLE devices (
@@ -70,3 +78,23 @@ CREATE TABLE IF NOT EXISTS search_feedback (
 );
 CREATE INDEX IF NOT EXISTS idx_search_feedback_query
     ON search_feedback (resource, lower(query));
+
+-- Handover-minutes importer: one row per disagreement a human still has to rule
+-- on (person under another employee code, field that contradicts the workbook,
+-- device created with half its spec, handover that looks already recorded). The
+-- importer never silently picks a side. Backs the Notifications screen + badge.
+-- Also created at app startup (see main.py) for already-running databases.
+CREATE TABLE IF NOT EXISTS import_issues (
+    id BIGSERIAL PRIMARY KEY,
+    created_at TIMESTAMP NOT NULL DEFAULT now(),
+    source_file VARCHAR(255),
+    kind VARCHAR(40) NOT NULL,
+    resource VARCHAR(16) NOT NULL DEFAULT 'handovers',
+    item_id VARCHAR(100),
+    payload JSONB NOT NULL DEFAULT '{}'::jsonb,
+    status VARCHAR(16) NOT NULL DEFAULT 'open',
+    resolved_at TIMESTAMP,
+    resolution JSONB
+);
+CREATE INDEX IF NOT EXISTS idx_import_issues_open
+    ON import_issues (status, created_at DESC);

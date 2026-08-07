@@ -61,7 +61,7 @@ flowchart LR
     end
 
     subgraph Host["🖥️ Windows Host"]
-        EMB["AI Embedder · OpenVINO<br/>e5-small · NPU→GPU→CPU<br/>:8001 · POST /rank"]
+        EMB["AI Embedder · OpenVINO<br/>e5-small · NPU→GPU→CPU<br/>:8010 · POST /rank"]
         LLM["Internal LLM server<br/>Caddy + Ollama · llama3.1:8b<br/>:8443/v1 · Bearer auth"]
     end
 
@@ -104,7 +104,7 @@ docker compose up         # API on :8000 (Swagger at /docs), Postgres on :5432
 ```bash
 cd fe
 npm install
-npm run dev               # Vite (:5173) + the host AI embedder (:8001) together
+npm run dev               # Vite (:5173) + the host AI embedder (:8010) together
 ```
 
 **3 — Seed sample data (idempotent):**
@@ -116,6 +116,19 @@ python -m be.seed         # needs DATABASE_URL, or run inside the api container
 **Other scripts:** `npm run build` (type-checks with `tsc -b`, then Vite build) · `npm run lint` (ESLint) · the AI service can run alone with `npm run dev:ai`.
 
 Full local stack = `docker compose up` (DB + API) **plus** `npm run dev` (web + AI embedder). The LLM server is a separate internal-network endpoint.
+
+---
+
+## 🌐 Deployed on the office LAN
+
+Live for the team at **http://192.168.3.252:10000** — Caddy serves the built SPA and proxies `/api/*` to the API container on the same origin, so there is no CORS in production. The `ITLedger-AutoStart` scheduled task brings everything back after a reboot with nobody logged in, and re-checks every 5 minutes.
+
+The deployment departs from the dev setup above in ways that matter — Caddy is shared with another stack on this host, Compose has to run inside WSL, and Python is vendored. **See [`deploy/README.md`](deploy/README.md) before changing anything there.**
+
+```bash
+cd fe && npm run build    # Caddy serves dist/ directly — no restart needed
+Get-Content deploy\autostart.log -Tail 10   # what the task did, and what is reachable
+```
 
 ---
 
@@ -191,11 +204,16 @@ be/                 FastAPI backend (Python 3.12, asyncpg)
   documents.py      Row → bilingual sentence flatteners for search + assistant
   glossary.py       bilingualize(): append Vietnamese synonyms of IT terms
   sql/schema.sql    Table DDL · seed.py  Idempotent sample-data seeder
-  docker-compose.yml  Postgres + API
+  docker-compose.yml       Postgres + API (dev)
+  docker-compose.prod.yml  LAN overlay (no reload, restart policy, loopback ports)
 
 ai/                 Local semantic-search embedder (runs on the HOST, NPU)
   main.py           FastAPI: POST /rank · OpenVINO on Intel NPU/GPU/CPU
-  run-host.ps1      Launcher: creates .venv, uvicorn on :8001
+  run-host.ps1      Launcher: creates .venv, uvicorn on :8010
+
+deploy/             LAN deployment (see deploy/README.md)
+  Caddyfile.site    :10000 site block — SPA + /api proxy
+  start-itledger.ps1 · register-task.ps1 · fetch-model.ps1
 
 fe/                 React 19 + Vite 8 + TypeScript
   src/api/          One module per resource; fetches go through client.ts

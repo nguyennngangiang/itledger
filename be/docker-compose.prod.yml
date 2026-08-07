@@ -1,0 +1,47 @@
+# Production overlay for the office-LAN deployment. Layered ON TOP of
+# docker-compose.yml (which stays the dev file), and run from INSIDE the WSL2
+# distro that hosts the Docker daemon:
+#
+#   wsl -d Ubuntu-24.04 -u root -- bash -lc \
+#     "cd /mnt/d/itledger/be && docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d"
+#
+# Running it from Windows instead does NOT work: DOCKER_HOST there points at a
+# different engine, and the api service bind-mounts the repo, so the daemon must
+# see it as a Linux path. deploy/start-itledger.ps1 runs exactly the line above.
+#
+# `!override` matters on ports: Compose *appends* list values when merging files,
+# so without it each service would inherit the base 0.0.0.0 publish as well and
+# the second bind would collide.
+
+services:
+  db:
+    restart: unless-stopped
+    # Loopback only. This host sits on the office LAN, and the base file publishes
+    # Postgres on every interface — which, with the password below, would put an
+    # open database on the network. Nothing outside this host needs it.
+    ports: !override
+      - "127.0.0.1:5432:5432"
+
+  api:
+    restart: unless-stopped
+    # Also loopback only: Caddy on :10000 is what fronts this for the LAN. (WSL2
+    # forwards published container ports to 127.0.0.1 regardless, so this is
+    # making the intent explicit rather than adding protection.)
+    ports: !override
+      - "127.0.0.1:8000:8000"
+    environment:
+      DATABASE_URL: postgresql://postgres:poop@db:5432/itledger
+      # The SPA is served from the same origin as /api (Caddy strips the prefix),
+      # so CORS is not exercised by the app at all. Kept for direct API calls when
+      # troubleshooting from a browser.
+      CORS_ORIGINS: http://192.168.3.252:10000
+      # The embedder is a native Windows process, not a container. Two departures
+      # from the base file: host.docker.internal is unreliable under a WSL-hosted
+      # daemon (the LAN IP is verified reachable from this distro), and :8001
+      # belongs to the LLM stack's rag container, hence 8010.
+      AI_URL: http://192.168.3.252:8010
+    # No --reload. Watching a 9p-mounted tree costs real CPU and would restart the
+    # API under users on any file touch.
+    command: >
+      sh -c "pip install --no-cache-dir -r be/requirements.txt &&
+             uvicorn be.main:app --host 0.0.0.0 --port 8000"

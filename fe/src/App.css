@@ -50,11 +50,32 @@
   border-bottom: 1px solid rgba(255, 255, 255, 0.6);
 }
 
+/* The brand is a button: it is how you get to the Dashboard now that Dashboard
+   is not a nav tab. It has to read as pressable, not as decoration. */
 .topbar-brand {
   display: flex;
   align-items: center;
   gap: 10px;
   flex-shrink: 0;
+  padding: 4px 10px 4px 4px;
+  border: 1px solid transparent;
+  border-radius: 11px;
+  background: transparent;
+  font-family: inherit;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+.topbar-brand:hover {
+  border-color: var(--accent-border);
+  background: var(--accent-bg);
+}
+.topbar-brand.active {
+  border-color: var(--accent-border);
+  background: var(--accent-bg);
+}
+.topbar-brand:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
 }
 .topbar-logo {
   display: grid;
@@ -112,12 +133,8 @@
   gap: 16px;
   flex-shrink: 0;
 }
-.quick-add {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-.quick-add-btn {
+/* Header buttons: the Add menu and the Import split control. */
+.topbar-btn {
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -133,22 +150,106 @@
   cursor: pointer;
   transition: all 0.15s ease;
 }
-.quick-add-btn:hover {
+.topbar-btn:hover {
   border-color: var(--accent);
   background: var(--accent);
   color: #fff;
 }
-.topbar-avatar {
+.topbar-btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* Import = [ Import ][▾]: one action, one menu, joined so they read as one
+   control. The caret is its own button on purpose — a hover-only menu is
+   unreachable by keyboard and on touch. */
+.topbar-split {
+  display: inline-flex;
+  align-items: center;
+}
+.topbar-split .topbar-btn--main {
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+}
+.topbar-split .topbar-btn--caret {
+  padding: 0 7px;
+  border-left: none;
+  border-top-left-radius: 0;
+  border-bottom-left-radius: 0;
+}
+
+/* Language shuffle. Same square icon-button shape as the bell; the `.on` state
+   follows the `.trash-toggle.open` convention for a two-state header control. */
+.topbar-globe {
   width: 36px;
   height: 36px;
   border-radius: 10px;
   display: grid;
   place-items: center;
-  font-weight: 700;
-  font-size: 13px;
   color: var(--accent);
   background: var(--accent-bg);
   border: 1px solid var(--accent-border);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+.topbar-globe:hover,
+.topbar-globe.on {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: #fff;
+}
+.topbar-globe.on svg {
+  animation: globe-spin 9s linear infinite;
+}
+@keyframes globe-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+.topbar-globe:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.topbar-bell {
+  position: relative;
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  display: grid;
+  place-items: center;
+  color: var(--accent);
+  background: var(--accent-bg);
+  border: 1px solid var(--accent-border);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+.topbar-bell:hover,
+.topbar-bell.active {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: #fff;
+}
+.topbar-bell:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+/* Count of open import issues. Sits on the bell rather than in the nav, so the
+   backlog is visible from every screen. */
+.topbar-bell-badge {
+  position: absolute;
+  top: -5px;
+  right: -5px;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 9px;
+  background: var(--danger, #f87171);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 18px;
+  text-align: center;
 }
 
 /* ---------- Page sub-header ---------- */
@@ -184,8 +285,7 @@
   flex-direction: column;
 }
 .app-content--flex .screen-toolbar,
-.app-content--flex .status-chips,
-.app-content--flex .ai-banner {
+.app-content--flex .status-chips {
   flex-shrink: 0;
 }
 .app-content--flex .panel {
@@ -249,7 +349,7 @@
   .topnav-item span {
     display: none;
   }
-  .quick-add-btn span {
+  .topbar-btn span {
     display: none;
   }
 }
@@ -473,6 +573,14 @@
 }
 .info-trigger:hover {
   color: var(--accent);
+}
+/* This popover trigger is tabbable, so keyboard users need to see where they
+   are — nothing else in the row draws a ring for them. */
+.info-trigger:focus-visible {
+  color: var(--accent);
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 4px;
 }
 .detail-bubble {
   display: grid;
@@ -1187,7 +1295,10 @@
 }
 .form-grid {
   display: grid;
-  grid-template-columns: repeat(2, 1fr);
+  /* minmax(0, 1fr), not 1fr: a bare 1fr is minmax(auto, 1fr), so the column
+     cannot shrink below its content and a long Select label ("Nguyễn Thị Hương
+     Thảo — SALES 2 - VUORI") pushes the whole field outside the modal. */
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 16px 18px;
 }
 .form-grid .form-field-full {
@@ -1197,6 +1308,7 @@
   display: flex;
   flex-direction: column;
   gap: 6px;
+  min-width: 0; /* same reason as above — let the control ellipsis instead of overflow */
 }
 .form-field > span {
   font-size: 13px;
@@ -1316,7 +1428,7 @@
    ============================================================ */
 
 /* Glowing quick-add buttons */
-.quick-add-btn:hover {
+.topbar-btn:hover {
   box-shadow: 0 6px 18px -4px rgba(124, 116, 232, 0.7);
   transform: translateY(-1px);
 }
@@ -1365,7 +1477,7 @@
 .app-shell .ant-btn-primary,
 .app-shell .ant-btn-default,
 .topnav-item,
-.quick-add-btn,
+.topbar-btn,
 .status-chip,
 .trash-toggle {
   position: relative; /* anchor the ring (primary already relative) */
@@ -1374,7 +1486,7 @@
 .app-shell .ant-btn-primary::before,
 .app-shell .ant-btn-default::before,
 .topnav-item::before,
-.quick-add-btn::before,
+.topbar-btn::before,
 .status-chip::before,
 .trash-toggle::before {
   content: "";
@@ -1403,7 +1515,7 @@
 .app-shell .ant-btn-primary:hover::before,
 .app-shell .ant-btn-default:hover::before,
 .topnav-item:hover::before,
-.quick-add-btn:hover::before,
+.topbar-btn:hover::before,
 .status-chip:hover::before,
 .trash-toggle:hover::before {
   opacity: 1;
@@ -1453,7 +1565,7 @@
   .app-shell .ant-btn-primary::before,
   .app-shell .ant-btn-default::before,
   .topnav-item::before,
-  .quick-add-btn::before,
+  .topbar-btn::before,
   .status-chip::before,
   .trash-toggle::before {
     animation: none;
@@ -1539,9 +1651,362 @@
   overflow: auto;
 }
 
+/* ============================================================
+   Import handover minutes — wizard, conflicts, notification badge
+   ============================================================ */
+.import-busy {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 13px;
+  color: var(--text-muted, #6b6785);
+}
+/* The single drop zone: a big, obvious target, since this is the front door for
+   every kind of import. The dashed frame is the drop target (it must be a div to
+   take the drag events); the button inside is what you click. */
+.import-zone {
+  width: 100%;
+  border: 1.5px dashed var(--accent-border);
+  border-radius: 14px;
+  background: var(--accent-bg);
+  transition: all 0.15s ease;
+}
+.import-zone > button {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 26px 20px;
+  border: 0;
+  border-radius: 14px;
+  background: none;
+  color: var(--accent);
+  font-family: inherit;
+  font-size: 14px;
+  text-align: center;
+  cursor: pointer;
+}
+.import-zone:hover,
+.import-zone.is-dragging {
+  border-color: var(--accent);
+}
+.import-zone.is-dragging {
+  transform: translateY(-1px);
+}
+.import-zone > button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.import-kind-picks {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 8px;
+}
+
+/* One row per dropped file: what it is, how far along, and how to change its
+   mind. A bulk run's whole state has to be readable at a glance. */
+.import-queue {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.import-queue-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 10px;
+  border: 1px solid var(--accent-border);
+  border-radius: 10px;
+  font-size: 13px;
+}
+.import-queue-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  color: var(--text-muted, #6b6785);
+}
+.import-queue-icon.is-done {
+  color: #16a34a;
+}
+.import-queue-icon.is-error {
+  color: #dc2626;
+}
+.import-queue-name {
+  flex: 1 1 140px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 500;
+}
+
+/* Step bar across the top of a review, plus "File 2/5" when part of a bulk run. */
+.import-steps {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  font-size: 12px;
+}
+.import-steps .ant-steps {
+  flex: 1 1 auto;
+}
+
+/* The review's answer to "what is about to happen" — four numbers, not a wall of
+   cards. Everything below it is only the rows that need a decision. */
+.import-summary-strip {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.import-stat {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 8px 12px;
+  border: 1px solid var(--accent-border);
+  border-radius: 10px;
+  background: var(--accent-bg);
+  font-size: 12px;
+  color: var(--text-muted, #6b6785);
+}
+.import-stat b {
+  font-size: 18px;
+  color: var(--text, inherit);
+}
+.import-stat.is-warn {
+  border-color: #f0b100;
+  background: #fefce8;
+}
+.import-stat.is-warn b {
+  color: #a16207;
+}
+.import-stat.is-ok b {
+  color: #16a34a;
+}
+.import-it-line {
+  font-size: 12px;
+  color: var(--text-muted, #6b6785);
+}
+
+/* Folded sections: the lines that are fine, and the dropped-cell warnings. */
+.import-fold,
+.import-warn-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--accent);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+.import-fold:hover,
+.import-warn-toggle:hover {
+  text-decoration: underline;
+}
+
+.import-plan-actions {
+  align-items: center;
+}
+.import-plan-go {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 12px;
+}
+
+/* Ask AI's offer to put a file it just read into the ledger. */
+.assistant-handoff {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 8px 10px;
+  border: 1px solid var(--accent-border);
+  border-radius: 10px;
+  background: var(--accent-bg);
+}
+
+/* "đã tự sửa từ …" — a correction is only acceptable if it says so and can be
+   undone. Quiet, but never hidden. */
+.field-corrected {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 4px;
+  font-size: 11.5px;
+  color: var(--text-muted, #6b6785);
+}
+.field-undo {
+  border: none;
+  background: none;
+  padding: 0;
+  font: inherit;
+  color: var(--accent);
+  text-decoration: underline;
+  cursor: pointer;
+}
+.field-undo:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.import-warnings {
+  margin: 0;
+  padding-left: 18px;
+  font-size: 12px;
+}
+.import-read {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.import-read-head {
+  font-size: 13px;
+}
+.import-parties {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 10px;
+}
+.import-party {
+  padding: 10px 12px;
+  border: 1px solid var(--accent-border);
+  border-radius: 10px;
+  background: var(--accent-bg);
+  font-size: 13px;
+}
+.import-party-label {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-muted, #6b6785);
+}
+.import-items {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12.5px;
+}
+.import-items th,
+.import-items td {
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--accent-border);
+  text-align: left;
+  vertical-align: top;
+}
+.import-items th {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-muted, #6b6785);
+}
+
+/* One card per line item — the flow badge and its reason are the point of the
+   reconcile step, so they get the visual weight. */
+.import-item-card {
+  padding: 10px 12px;
+  border: 1px solid var(--accent-border);
+  border-radius: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.import-item-card.is-skipped {
+  opacity: 0.55;
+}
+.import-item-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  font-size: 13px;
+}
+.import-item-actions {
+  margin-left: auto;
+  display: flex;
+  gap: 6px;
+}
+.import-item-reason,
+.import-item-effect {
+  font-size: 12px;
+  color: var(--text-muted, #6b6785);
+}
+/* A disagreement, settled where it is read. This used to be a one-line row with a
+   button that stacked a modal on the modal; the radio rows now sit inside it. */
+.import-issue {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-top: 6px;
+  border-top: 1px dashed var(--accent-border);
+  font-size: 12px;
+}
+.import-issue.is-settled {
+  opacity: 0.7;
+}
+.import-issue-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.import-issue-text {
+  flex: 1 1 320px;
+}
+.import-issue-confirm {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.conflict-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.conflict-row {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--accent-border);
+}
+.conflict-field {
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-muted, #6b6785);
+}
+.conflict-manual {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  font-size: 12px;
+}
+
 @media (prefers-reduced-motion: reduce) {
+  /* The header menus slide in by default; that is motion nobody asked for. */
+  .ant-dropdown,
+  .ant-dropdown-menu {
+    animation: none !important;
+    transition: none !important;
+  }
   .topnav-indicator {
     transition: none;
+  }
+  /* The globe keeps spinning while the shuffle is on — that is exactly the kind
+     of idle motion reduced-motion asks to be spared. */
+  .topbar-globe.on svg {
+    animation: none;
   }
 }
 
@@ -1659,185 +2124,6 @@
     max-width: calc(100vw - 20px) !important;
     margin: 0 auto;
   }
-}
-
-/* ============================================================
-   Smart (semantic) search — banner + relevance meter
-   ============================================================ */
-.ai-banner {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  margin-bottom: 14px;
-  padding: 10px 16px;
-  border: 1px solid var(--accent-border);
-  border-radius: var(--radius);
-  background: linear-gradient(120deg, var(--accent-bg), rgba(217, 70, 239, 0.08));
-  color: var(--text);
-  font-size: 13px;
-}
-.ai-banner-text {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  color: var(--accent);
-}
-.ai-banner-text b {
-  color: var(--text);
-}
-
-.relevance {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-}
-.relevance-track {
-  position: relative;
-  width: 74px;
-  height: 7px;
-  border-radius: 999px;
-  background: var(--surface-muted);
-  overflow: hidden;
-}
-.relevance-fill {
-  position: absolute;
-  inset: 0 auto 0 0;
-  border-radius: 999px;
-  background: linear-gradient(90deg, #8b83f0, #d946ef);
-  transition: width 0.4s ease;
-}
-.relevance-num {
-  font-size: 12px;
-  font-weight: 700;
-  color: var(--accent);
-  min-width: 34px;
-}
-
-/* "Why this matched?" trigger — sits beside the relevance bar on smart results.
-   Distinct magnifier-with-check icon; reveals the evidence popover on hover. */
-.prove-trigger {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  color: var(--text-faint);
-  cursor: help;
-  transition: color 0.15s ease, transform 0.15s ease;
-}
-.prove-trigger:hover {
-  color: var(--accent);
-  transform: scale(1.15);
-}
-.prove-overlay .ant-popover-inner {
-  max-width: 340px;
-}
-.prove-pop {
-  max-width: 320px;
-}
-.prove-pop-head {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 10px;
-  margin-bottom: 8px;
-}
-.prove-pop-score {
-  font-size: 13px;
-  font-weight: 800;
-  color: var(--accent);
-}
-.prove-pop-note {
-  font-size: 11px;
-  font-weight: 500;
-  color: var(--text-muted);
-}
-.prove-pop-text {
-  margin: 0;
-  font-size: 13px;
-  line-height: 1.55;
-  color: var(--text);
-}
-.prove-hl {
-  background: linear-gradient(90deg, #8b83f0, #d946ef);
-  color: #fff;
-  padding: 0 4px;
-  border-radius: 5px;
-  font-weight: 600;
-}
-.prove-pop-foot {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  margin-top: 9px;
-  padding-top: 8px;
-  border-top: 1px solid var(--border);
-  font-size: 11.5px;
-  font-weight: 500;
-  color: var(--accent);
-}
-
-/* LLM explanation line inside the proof card */
-.prove-pop-why {
-  display: flex;
-  align-items: flex-start;
-  gap: 6px;
-  margin: 4px 0 8px;
-  padding: 8px 10px;
-  border-radius: 8px;
-  background: var(--accent-bg);
-  border: 1px solid var(--accent-border);
-  font-size: 12.5px;
-  line-height: 1.5;
-  color: var(--text);
-}
-.prove-pop-why svg {
-  flex: 0 0 auto;
-  margin-top: 1px;
-  color: var(--accent);
-}
-.prove-pop-dim {
-  color: var(--text-muted);
-  font-style: italic;
-}
-.prove-pop-reason {
-  margin: 0 0 8px;
-  font-size: 12px;
-  line-height: 1.5;
-  color: var(--text-muted);
-}
-.prove-pop-reason b {
-  color: var(--accent);
-}
-
-/* "Mark as correct" — the training signal */
-.prove-mark {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  margin-top: 10px;
-  width: 100%;
-  justify-content: center;
-  padding: 7px 12px;
-  border: 1px solid var(--accent-border);
-  border-radius: 8px;
-  background: var(--accent-bg);
-  color: var(--accent);
-  font-family: inherit;
-  font-size: 12.5px;
-  font-weight: 600;
-  cursor: pointer;
-  transition: all 0.15s ease;
-}
-.prove-mark:hover:not(:disabled) {
-  background: var(--accent);
-  color: #fff;
-  border-color: var(--accent);
-}
-.prove-mark.done {
-  background: #ecfdf5;
-  border-color: #6ee7b7;
-  color: #059669;
-  cursor: default;
 }
 
 /* ---------- Ask-AI assistant panel (right-docked Drawer) ---------- */

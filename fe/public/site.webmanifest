@@ -1,0 +1,17 @@
+{
+  "id": "/",
+  "name": "IT Ledger — Asset Management",
+  "short_name": "IT Ledger",
+  "description": "Internal IT asset ledger — track company devices, owners, repair history and handovers in one place.",
+  "lang": "en",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "theme_color": "#4f46e5",
+  "background_color": "#f5f4fb",
+  "icons": [
+    { "src": "/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png" },
+    { "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml" }
+  ]
+}

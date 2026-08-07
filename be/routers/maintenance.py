@@ -11,6 +11,7 @@ from ..documents import maintenance_document
 from ..search import rank
 from .. import llm
 from ..models.maintenance import MaintenanceCreate, MaintenanceOut, MaintenanceUpdate
+from ..repositories import distinct_values
 from ..repositories import maintenance as repo
 from ..repositories import device as device_repo
 from ..repositories import feedback as feedback_repo
@@ -18,6 +19,13 @@ from ..repositories import user as user_repo
 from ..repositories.errors import DuplicateError, ForeignKeyError
 
 router = APIRouter(prefix="/maintenance", tags=["maintenance"])
+
+
+class ImportResult(BaseModel):
+    """Same shape as /devices/import so the import modals read alike."""
+    inserted: int
+    skipped: int
+    total: int
 
 
 class MaintenancePage(BaseModel):
@@ -84,9 +92,34 @@ async def page_maintenance(
     return {"rows": rows, "total": total}
 
 
+@router.post("/import", response_model=ImportResult)
+async def import_maintenance(
+    records: list[MaintenanceCreate], pool=Depends(get_pool)
+):
+    """Bulk-insert parsed repair rows. Re-importing the same file is idempotent —
+    see repo.import_maintenance for why the dedup key is (device, date, part) and
+    not the id. Rows naming an unknown serial are skipped, not rejected, so one bad
+    line cannot fail the whole sheet. Declared before /{maintenance_id}."""
+    return await repo.import_maintenance(pool, records)
+
+
 @router.get("/search", response_model=list[MaintenanceOut])
 async def search_maintenance(q: str, pool=Depends(get_pool)):
     return await repo.search(pool, q)
+
+
+@router.get("/suggestions", response_model=dict[str, list[str]])
+async def maintenance_suggestions(pool=Depends(get_pool)):
+    """Values already used, per column — feeds the repair form's autocompletes,
+    so it suggests the phrasing the team actually writes. One response for every
+    suggestable column. Declared before /{maintenance_id} so "suggestions" isn't
+    read as an id."""
+    return {
+        field: await distinct_values(
+            pool, "maintenance", field, repo.SUGGESTABLE_FIELDS
+        )
+        for field in sorted(repo.SUGGESTABLE_FIELDS)
+    }
 
 
 @router.get("/semantic-search", response_model=list[MaintenanceRanked])

@@ -6,6 +6,7 @@ asyncpg uses $1, $2 ... placeholders — never string-format user values into SQ
 import asyncpg
 
 from ..models.device import DeviceCreate, DeviceUpdate
+from . import owner_match
 from .errors import DuplicateError, ForeignKeyError
 
 # Shared column list so SELECT / RETURNING always match the DeviceOut shape.
@@ -13,6 +14,20 @@ COLUMNS = (
     "serial_number, barcode, type, brand, cpu, ram, storage, "
     "os, msoffice, buy_date, name, user_id, status"
 )
+
+# The ghost account that holds anything nobody is using. Mirrors GHOST_CODE in
+# repositories/user.py and GHOST_USER_CODE in fe/src/types.ts.
+GHOST_CODE = "IT-STORE"
+# Statuses that mean IT is physically holding the machine, so no person can be
+# its owner. The active/in_stock pair is only auto-filled in the UI and stays
+# editable; THIS one is a rule, enforced here so an import or a direct API call
+# cannot leave a device under repair sitting on someone's name.
+IT_HELD_STATUSES = frozenset({"maintaining", "on_del"})
+
+
+def owner_for_status(status: str | None, user_id: str | None) -> str | None:
+    """IT-STORE owns whatever is being repaired or written off."""
+    return GHOST_CODE if status in IT_HELD_STATUSES else user_id
 
 async def create_batch(pool: asyncpg.Pool, devices: list[DeviceCreate]) -> list[dict]:
     try:
@@ -34,6 +49,7 @@ async def create_batch(pool: asyncpg.Pool, devices: list[DeviceCreate]) -> list[
         raise ForeignKeyError(f"Unknown user_id: {device.user_id}") from e
 
 async def create(pool: asyncpg.Pool, device: DeviceCreate) -> dict:
+    owner = owner_for_status(device.status, device.user_id)
     try:
         row = await pool.fetchrow(
             f"""INSERT INTO devices ({COLUMNS})
@@ -41,7 +57,7 @@ async def create(pool: asyncpg.Pool, device: DeviceCreate) -> dict:
                 RETURNING {COLUMNS}""",
             device.serial_number, device.barcode, device.type, device.brand,
             device.cpu, device.ram, device.storage, device.os, device.msoffice,
-            device.buy_date, device.name, device.user_id, device.status,
+            device.buy_date, device.name, owner, device.status,
         )
     except asyncpg.UniqueViolationError as e:
         raise DuplicateError(f"Device already exists: {device.serial_number}") from e
@@ -94,8 +110,9 @@ async def list_page(
         params.append(f"%{q}%")
         i = len(params)
         conditions.append(
-            f"(serial_number ILIKE ${i} OR name ILIKE ${i} "
-            f"OR brand ILIKE ${i} OR os ILIKE ${i})"
+            f"(serial_number ILIKE ${i} OR unaccent(name) ILIKE unaccent(${i}) "
+            f"OR unaccent(brand) ILIKE unaccent(${i}) OR os ILIKE ${i} "
+            f"OR {owner_match('devices.user_id', i)})"
         )
     where = " WHERE " + " AND ".join(conditions)
 
@@ -120,6 +137,21 @@ async def get(pool: asyncpg.Pool, serial_number: str) -> dict | None:
     return dict(row) if row else None
 
 
+async def get_many(pool: asyncpg.Pool, serial_numbers: list[str]) -> dict[str, dict]:
+    """Devices by serial in one query, keyed by serial; missing serials are absent.
+
+    Deleted rows are included on purpose — `get` returns them too, and the importer
+    reconciling a line item needs to know the serial exists at all.
+    """
+    if not serial_numbers:
+        return {}
+    rows = await pool.fetch(
+        f"SELECT {COLUMNS} FROM devices WHERE serial_number = ANY($1::varchar[])",
+        serial_numbers,
+    )
+    return {r["serial_number"]: dict(r) for r in rows}
+
+
 async def update(
     pool: asyncpg.Pool, serial_number: str, device: DeviceUpdate
 ) -> dict | None:
@@ -128,6 +160,20 @@ async def update(
     if not fields:
         # Nothing to change — return the current row (or None if missing).
         return await get(pool, serial_number)
+
+    # Reconcile owner and status against each other. A PATCH may carry either
+    # one alone, so the missing half comes from the stored row: setting status
+    # to maintaining moves the device to IT-STORE even though the caller said
+    # nothing about the owner.
+    if "status" in fields or "user_id" in fields:
+        current = await get(pool, serial_number)
+        if current is None:
+            return None
+        status = fields.get("status", current["status"])
+        user_id = fields.get("user_id", current["user_id"])
+        owner = owner_for_status(status, user_id)
+        if owner != user_id:
+            fields["user_id"] = owner
 
     # Column names come from the Pydantic model (not user strings), so this is safe.
     cols = list(fields.keys())
@@ -225,15 +271,27 @@ async def import_devices(pool: asyncpg.Pool, devices: list[DeviceCreate]) -> dic
 
 
 async def search(pool: asyncpg.Pool, q: str) -> list[dict]:
+    # Also backs the assistant's find_devices tool, so Ask AI can look a machine
+    # up by who holds it, not just by serial.
     rows = await pool.fetch(
         f"SELECT {COLUMNS} FROM devices "
-        f"WHERE deleted_at IS NULL AND (serial_number ILIKE $1 OR name ILIKE $1)",
+        f"WHERE deleted_at IS NULL AND (serial_number ILIKE $1 "
+        f"OR unaccent(name) ILIKE unaccent($1) "
+        f"OR {owner_match('devices.user_id', 1)})",
         f"%{q}%",
     )
     return [dict(r) for r in rows]
 
 FILTERABLE_FIELDS = frozenset({
     "type", "brand", "cpu", "ram", "storage", "os", "msoffice", "user_id", "status"
+})
+
+# Columns offered as form autocomplete (see repositories.distinct_values).
+# Deliberately not FILTERABLE_FIELDS: `name` is worth suggesting but filtering
+# on an exact device name is useless, and suggesting user_id/status makes no
+# sense when both already have proper pickers.
+SUGGESTABLE_FIELDS = frozenset({
+    "type", "brand", "cpu", "ram", "storage", "os", "msoffice", "name"
 })
 
 

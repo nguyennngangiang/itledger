@@ -8,21 +8,20 @@ import {
   deleteHandover,
   deleteHandoversBatch,
   restoreHandover,
-  semanticSearchHandovers,
 } from "../api/handovers";
-import { listUsers } from "../api/users";
+import { listUsersIncludingDeleted } from "../api/users";
 import { listDevices } from "../api/devices";
-import type { Handover, HandoverRanked, Device, User } from "../types";
+import type { Handover, Device, User } from "../types";
 import { ConfirmModal } from "./Modal/ConfirmModal";
 import { BulkDeleteBar } from "./BulkDeleteBar";
 import { TrashToggle } from "./TrashToggle";
 import HandoverModal from "./Modal/HandoverModal";
-import { PlusIcon, RefreshIcon, ArrowRightIcon, TrashIcon, EditIcon, SearchIcon, SparklesIcon, ProveIcon } from "./icons";
-import { useSmartProof } from "../lib/relevance";
+import { PlusIcon, RefreshIcon, ArrowRightIcon, TrashIcon, EditIcon, SearchIcon } from "./icons";
 import { formatDate, resolveOwner, toUserMap } from "../lib/format";
 import { usePagedList } from "../lib/usePagedList";
 import { TABLE_SCROLL } from "../lib/table";
 import { DeviceJourneyPanel } from "./DeviceJourneyPanel";
+import { useT } from "../i18n/useT";
 
 export const HandoverScreen = ({
   refreshKey = 0,
@@ -31,6 +30,7 @@ export const HandoverScreen = ({
   refreshKey?: number;
   onAdd?: () => void;
 }) => {
+  const { t } = useT();
   const [users, setUsers] = useState<Record<string, User>>({});
   const [devices, setDevices] = useState<Record<string, Device>>({});
   const [searchText, setSearchText] = useState("");
@@ -38,49 +38,8 @@ export const HandoverScreen = ({
   const [editTarget, setEditTarget] = useState<Handover | null>(null);
   const [selectedKeys, setSelectedKeys] = useState<string[]>([]);
   const [bulkConfirm, setBulkConfirm] = useState(false);
-  // Smart (semantic) search: when aiResults !== null the table shows ranked hits.
-  const [smart, setSmart] = useState(false);
-  const [rerank, setRerank] = useState(false); // LLM re-sort of smart results
-  const [aiResults, setAiResults] = useState<HandoverRanked[] | null>(null);
-  const [aiQuery, setAiQuery] = useState("");
-  const [aiLoading, setAiLoading] = useState(false);
   const [selected, setSelected] = useState<Handover | null>(null);
   const [deviceHandovers, setDeviceHandovers] = useState<Handover[]>([]);
-
-  const showingAi = aiResults !== null;
-
-  const { proofColumn } = useSmartProof<Handover>({
-    resource: "handovers",
-    query: aiQuery,
-    idOf: (h) => h.handover_id,
-  });
-
-  const clearAi = () => {
-    setAiResults(null);
-    setAiQuery("");
-  };
-
-  const runSearch = async () => {
-    const q = searchText.trim();
-    if (!smart) {
-      list.applySearch(q);
-      return;
-    }
-    if (!q) {
-      clearAi();
-      return;
-    }
-    setAiLoading(true);
-    try {
-      const res = await semanticSearchHandovers(q, 30, rerank);
-      setAiResults(res);
-      setAiQuery(q);
-    } catch (e) {
-      toast.error("Smart search failed: " + e);
-    } finally {
-      setAiLoading(false);
-    }
-  };
 
   const list = usePagedList<Handover>(pageHandovers, {
     defaultOrderBy: "handover_date",
@@ -121,14 +80,16 @@ export const HandoverScreen = ({
       );
       setSelectedKeys([]);
     } catch (e) {
-      toast.error("Failed: " + e);
+      toast.error(t("row.toast.failed", { error: String(e) }));
     } finally {
       list.reload();
     }
   };
 
   useEffect(() => {
-    Promise.all([listUsers(), listDevices()])
+    // Includes trashed staff — a handover names whoever held the device at the
+    // time, and history should keep reading as history after they leave.
+    Promise.all([listUsersIncludingDeleted(), listDevices()])
       .then(([us, ds]) => {
         setUsers(toUserMap(us));
         setDevices(Object.fromEntries(ds.map((d) => [d.serial_number, d])));
@@ -140,9 +101,9 @@ export const HandoverScreen = ({
     setDeleteTarget(null);
     try {
       await deleteHandover(id, permanent);
-      toast.success(permanent ? "Permanently deleted" : "Moved to trash");
+      toast.success(t(permanent ? "row.toast.deleted" : "row.toast.trashed"));
     } catch (e) {
-      toast.error("Failed: " + e);
+      toast.error(t("row.toast.failed", { error: String(e) }));
     } finally {
       list.reload();
     }
@@ -151,9 +112,9 @@ export const HandoverScreen = ({
   const handleRestore = async (id: string) => {
     try {
       await restoreHandover(id);
-      toast.success("Restored");
+      toast.success(t("row.toast.restored"));
     } catch (e) {
-      toast.error("Failed: " + e);
+      toast.error(t("row.toast.failed", { error: String(e) }));
     } finally {
       list.reload();
     }
@@ -173,7 +134,7 @@ export const HandoverScreen = ({
 
   const columns: TableColumnsType<Handover> = [
     {
-      title: "Date",
+      title: t("handover.col.date"),
       dataIndex: "handover_date",
       key: "handover_date",
       width: 130,
@@ -181,7 +142,7 @@ export const HandoverScreen = ({
       render: (v) => (v ? formatDate(v) : dash),
     },
     {
-      title: "Device",
+      title: t("handover.col.device"),
       dataIndex: "device_id",
       key: "device_id",
       sorter: true,
@@ -192,7 +153,7 @@ export const HandoverScreen = ({
       ),
     },
     {
-      title: "Transfer",
+      title: t("handover.col.transfer"),
       key: "transfer",
       align: "center",
       render: (_, h) => (
@@ -206,7 +167,7 @@ export const HandoverScreen = ({
       ),
     },
     {
-      title: "Reason",
+      title: t("handover.col.reason"),
       dataIndex: "reason",
       key: "reason",
       render: (v) => (v ? v : dash),
@@ -215,15 +176,19 @@ export const HandoverScreen = ({
       title: "",
       key: "options",
       width: 140,
-      render: (_, h) =>
-        list.trashed ? (
+      render: (_, h) => {
+        // Name the row in the label — every row shows the same icons.
+        const label = `handover of ${h.device_id}`;
+        return list.trashed ? (
           <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
             <Button size="small" onClick={() => handleRestore(h.handover_id)}>
-              Restore
+              {t("row.action.restore")}
             </Button>
             <Button
               type="text"
               danger
+              aria-label={t("row.action.deleteForever", { label })}
+              title={t("row.action.deleteForever", { label })}
               icon={<TrashIcon size={18} />}
               onClick={() => setDeleteTarget(h)}
             />
@@ -232,17 +197,22 @@ export const HandoverScreen = ({
           <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
             <Button
               type="text"
+              aria-label={t("row.action.edit", { label })}
+              title={t("row.action.edit", { label })}
               icon={<EditIcon size={18} />}
               onClick={() => setEditTarget(h)}
             />
             <Button
               type="text"
               danger
+              aria-label={t("row.action.trash", { label })}
+              title={t("row.action.trash", { label })}
               icon={<TrashIcon size={18} />}
               onClick={() => setDeleteTarget(h)}
             />
           </div>
-        ),
+        );
+      },
     },
   ];
 
@@ -252,77 +222,33 @@ export const HandoverScreen = ({
         <div className="screen-search">
           <Input
             allowClear
-            prefix={smart ? <SparklesIcon size={16} /> : <SearchIcon size={16} />}
-            placeholder={
-              smart
-                ? "Describe the handover you're looking for… (Enter)"
-                : "Search handovers… (Enter)"
-            }
+            prefix={<SearchIcon size={16} />}
+            placeholder={t("search.handover")}
             style={{ width: 320 }}
             value={searchText}
             onChange={(e) => {
               setSearchText(e.target.value);
-              if (e.target.value === "") {
-                if (smart) clearAi();
-                else list.applySearch("");
-              }
+              list.search(e.target.value.trim());
             }}
-            onPressEnter={runSearch}
+            onPressEnter={() => list.searchNow(searchText.trim())}
           />
-          <Button
-            type={smart ? "primary" : "default"}
-            icon={<SparklesIcon size={16} />}
-            title="AI semantic search — search by meaning, not keywords"
-            onClick={() => {
-              const next = !smart;
-              setSmart(next);
-              if (!next) clearAi();
-            }}
-          >
-            {smart ? "Smart: on" : "Smart"}
-          </Button>
-          {smart && (
-            <Button
-              type={rerank ? "primary" : "default"}
-              icon={<ProveIcon size={16} />}
-              title="Re-rank smart results with the LLM — it learns from your marks"
-              onClick={() => setRerank((v) => !v)}
-            >
-              {rerank ? "LLM rerank: on" : "LLM rerank"}
-            </Button>
-          )}
         </div>
         <div className="toolbar-actions">
           <TrashToggle trashed={list.trashed} onToggle={list.toggleTrash} />
           <Button icon={<RefreshIcon size={16} />} onClick={list.reload}>
-            Refresh
+            {t("device.refresh")}
           </Button>
           <Button type="primary" icon={<PlusIcon size={16} />} onClick={onAdd}>
-            Record Handover
+            {t("handover.add")}
           </Button>
         </div>
       </div>
-
-      {showingAi && (
-        <div className="ai-banner">
-          <span className="ai-banner-text">
-            <SparklesIcon size={16} />
-            Smart results for <b>“{aiQuery}”</b> — {aiResults!.length} matches,
-            {rerank
-              ? " re-ranked by the LLM · it learns from your marks"
-              : " ranked by meaning"}
-          </span>
-          <Button size="small" onClick={clearAi}>
-            Clear
-          </Button>
-        </div>
-      )}
 
       <div className="split-view">
         <div className="panel table-panel">
           <div className="panel-head">
             <span className="panel-title">
-              {showingAi ? "Smart results" : list.trashed ? "Trash" : "Handover history"}
+              {t(list.trashed ? "panel.trash" : "handover.panel")}
             </span>
             {selectedKeys.length > 0 ? (
               <BulkDeleteBar
@@ -332,45 +258,24 @@ export const HandoverScreen = ({
                 onClear={() => setSelectedKeys([])}
               />
             ) : (
-              <span className="panel-count">
-                {showingAi ? `${aiResults!.length} matches` : `${list.total} total`}
-              </span>
+              <span className="panel-count">{t("panel.total", { n: list.total })}</span>
             )}
           </div>
           <div className="table-wrap">
-            {showingAi ? (
-              <Table<Handover>
-                rowKey="handover_id"
-                columns={[proofColumn, ...columns]}
-                dataSource={aiResults!}
-                loading={aiLoading}
-                pagination={false}
-                scroll={TABLE_SCROLL}
-                rowSelection={{
-                  selectedRowKeys: selectedKeys,
-                  onChange: (keys) => setSelectedKeys(keys as string[]),
-                }}
-                onRow={(h) => ({
-                  onClick: () => setSelected(h),
-                  className: selected?.handover_id === h.handover_id ? "row-selected" : "",
-                })}
-              />
-            ) : (
-              <Table<Handover>
-                rowKey="handover_id"
-                columns={columns}
-                scroll={TABLE_SCROLL}
-                rowSelection={{
-                  selectedRowKeys: selectedKeys,
-                  onChange: (keys) => setSelectedKeys(keys as string[]),
-                }}
-                onRow={(h) => ({
-                  onClick: () => setSelected(h),
-                  className: selected?.handover_id === h.handover_id ? "row-selected" : "",
-                })}
-                {...list.tableProps}
-              />
-            )}
+            <Table<Handover>
+              rowKey="handover_id"
+              columns={columns}
+              scroll={TABLE_SCROLL}
+              rowSelection={{
+                selectedRowKeys: selectedKeys,
+                onChange: (keys) => setSelectedKeys(keys as string[]),
+              }}
+              onRow={(h) => ({
+                onClick: () => setSelected(h),
+                className: selected?.handover_id === h.handover_id ? "row-selected" : "",
+              })}
+              {...list.tableProps}
+            />
           </div>
         </div>
 
@@ -405,8 +310,8 @@ export const HandoverScreen = ({
         <ConfirmModal
           message={
             list.trashed
-              ? "Permanently delete this handover record? This cannot be undone."
-              : "Move this handover record to trash?"
+              ? t("handover.confirm.delete")
+              : t("handover.confirm.trash")
           }
           onConfirm={() => handleDelete(deleteTarget.handover_id, list.trashed)}
           onCancel={() => setDeleteTarget(null)}
@@ -416,14 +321,18 @@ export const HandoverScreen = ({
       {bulkConfirm && (
         <ConfirmModal
           message={
-            list.trashed
-              ? `Permanently delete ${selectedKeys.length} selected record(s)? This cannot be undone.`
-              : `Move ${selectedKeys.length} selected record(s) to trash?`
+            t(
+              list.trashed
+                ? "handover.confirm.bulkDelete"
+                : "handover.confirm.bulkTrash",
+              { n: selectedKeys.length },
+            )
           }
           onConfirm={handleBulkDelete}
           onCancel={() => setBulkConfirm(false)}
         />
       )}
+
     </>
   );
 };

@@ -9,7 +9,8 @@ export type PageParams = {
   order?: "asc" | "desc";
   deleted?: boolean;
   q?: string;
-  status?: string; // devices only
+  status?: string; // device lifecycle status, or employee active/retired
+  noTeam?: boolean; // employees only — the ones with no department recorded
 };
 
 export function pageQuery(p: PageParams): string {
@@ -21,5 +22,6 @@ export function pageQuery(p: PageParams): string {
   if (p.deleted) s.set("deleted", "true");
   if (p.q) s.set("q", p.q);
   if (p.status) s.set("status", p.status);
+  if (p.noTeam) s.set("no_team", "true");
   return s.toString();
 }
