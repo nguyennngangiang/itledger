@@ -53,6 +53,67 @@ export async function request<T>(path: string, options: RequestInit = {}): Promi
 }
 
 /**
+ * POST that answers with Server-Sent Events, yielded one parsed event at a time.
+ *
+ * Only the handover reader needs this, and only because its wait is long enough to
+ * look like a hang: a scanned record is OCR'd for tens of seconds, and a cold model
+ * spends ~44s loading before it emits a character. `request()` cannot express that —
+ * it has one result and no middle.
+ *
+ * Errors arrive two ways and both matter. A request that fails outright still has a
+ * status to read, so it throws `ApiError` like everything else here. A request that
+ * fails AFTER the stream opened cannot change its status code, so the server sends
+ * a `{phase:"error"}` event; that one is the caller's to notice.
+ */
+export async function* streamRequest<T>(
+  path: string,
+  options: RequestInit = {},
+): AsyncGenerator<T> {
+  const res = await fetch(`${BASE_URL}${path}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options.headers },
+    ...options,
+  })
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}))
+    throw new ApiError(res.status, describeDetail(body.detail, res.statusText))
+  }
+  if (!res.body) throw new ApiError(500, 'Empty response stream')
+
+  const reader = res.body.getReader()
+  const decoder = new TextDecoder()
+  let buffer = ''
+  try {
+    for (;;) {
+      const { done, value } = await reader.read()
+      if (done) break
+      buffer += decoder.decode(value, { stream: true })
+      // Events are separated by a blank line; anything after the last one is a
+      // partial event that has to wait for the next chunk.
+      const chunks = buffer.split('\n\n')
+      buffer = chunks.pop() ?? ''
+      for (const chunk of chunks) {
+        const data = chunk
+          .split('\n')
+          .filter((line) => line.startsWith('data:'))
+          .map((line) => line.slice(5).trim())
+          .join('')
+        if (!data) continue
+        try {
+          yield JSON.parse(data) as T
+        } catch {
+          // A malformed event is not worth failing a whole read over.
+        }
+      }
+    }
+  } finally {
+    // Abandoning the generator early (an unmounted modal) must not leave the
+    // response body open.
+    reader.cancel().catch(() => {})
+  }
+}
+
+/**
  * DELETE /<resource>/batch. Every resource had a byte-identical copy of this,
  * differing only in the path segment and what it called the id list.
  *

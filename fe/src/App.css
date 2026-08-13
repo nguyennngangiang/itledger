@@ -1661,25 +1661,75 @@
   font-size: 13px;
   color: var(--text-muted, #6b6785);
 }
-/* The single drop zone: a big, obvious target, since this is the front door for
-   every kind of import. The dashed frame is the drop target (it must be a div to
-   take the drag events); the button inside is what you click. */
+/* The read step's progress. The phase name leads and the count sits to its right,
+   because "23 of 40 rows" is the reassuring half and it should be where the eye
+   lands last, not buried under a percentage. No percentage is printed at all: the
+   row count IS the number, and two numbers competing would make the honest one
+   look like decoration. */
+.import-progress {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface-muted);
+}
+.import-progress-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 13px;
+}
+.import-progress-label {
+  font-weight: 600;
+  color: var(--text);
+}
+.import-progress-detail {
+  /* Tabular figures so "9 of 15" → "10 of 15" doesn't shuffle the line sideways
+     once a second. */
+  font-variant-numeric: tabular-nums;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+.import-progress .ant-progress {
+  margin: 0;
+  line-height: 1;
+}
+/* The shimmer on an unknown-length phase is motion carrying meaning, so it needs a
+   still fallback rather than removal: the bar keeps its filled width and simply
+   stops moving. */
+@media (prefers-reduced-motion: reduce) {
+  .import-progress .ant-progress-bg::before,
+  .import-progress .ant-progress-status-active .ant-progress-bg::before {
+    animation: none;
+  }
+}
+/* The single drop zone: the front door for every kind of import, so it is the one
+   thing on this dialog allowed to be big. The dashed frame is the drop target (it
+   must be a div to take the drag events); the button inside is what you click. */
 .import-zone {
   width: 100%;
   border: 1.5px dashed var(--accent-border);
-  border-radius: 14px;
-  background: var(--accent-bg);
-  transition: all 0.15s ease;
+  border-radius: 16px;
+  background:
+    radial-gradient(120% 100% at 50% 0%, rgba(139, 131, 240, 0.1), transparent 70%),
+    var(--accent-bg);
+  transition:
+    border-color 0.15s ease,
+    transform 0.15s ease,
+    box-shadow 0.15s ease;
 }
 .import-zone > button {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
   width: 100%;
-  padding: 26px 20px;
+  padding: 24px 20px 20px;
   border: 0;
-  border-radius: 14px;
+  border-radius: 16px;
   background: none;
   color: var(--accent);
   font-family: inherit;
@@ -1687,12 +1737,45 @@
   text-align: center;
   cursor: pointer;
 }
+/* The one aurora moment on this dialog — the gesture it is asking for. */
+.import-zone-glyph {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 52px;
+  height: 52px;
+  border-radius: 999px;
+  background: linear-gradient(135deg, #8b83f0, #7c74e8 45%, #a855f7);
+  color: #fff;
+  box-shadow: 0 8px 18px -6px rgba(124, 116, 232, 0.55);
+}
+/* What it accepts, as chips rather than a sentence — a scan of four words beats a
+   line of prose nobody reads twice. */
+.import-zone-formats {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  justify-content: center;
+  margin-top: 2px;
+}
+.import-format {
+  padding: 1px 8px;
+  border: 1px solid var(--accent-border);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.7);
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
 .import-zone:hover,
 .import-zone.is-dragging {
   border-color: var(--accent);
 }
 .import-zone.is-dragging {
-  transform: translateY(-1px);
+  transform: translateY(-2px);
+  border-style: solid;
+  box-shadow: 0 14px 30px -12px rgba(124, 116, 232, 0.5);
 }
 .import-zone > button:focus-visible {
   outline: 2px solid var(--accent);
@@ -1706,42 +1789,233 @@
   margin-top: 8px;
 }
 
-/* One row per dropped file: what it is, how far along, and how to change its
-   mind. A bulk run's whole state has to be readable at a glance. */
-.import-queue {
+/* ---------------------------------------------------------- dropped-file cards
+   A card per file, not a row per file. A file in a bulk run has a story — what we
+   think it is, why, how far along, what it did — and that never fit on one line;
+   squeezing it there is what made this screen read as a list of filenames. */
+.import-files {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 8px;
 }
-.import-queue-row {
+.import-file {
   display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 7px 10px;
-  border: 1px solid var(--accent-border);
-  border-radius: 10px;
-  font-size: 13px;
+  align-items: flex-start;
+  gap: 11px;
+  padding: 12px 12px 12px 13px;
+  border: 1px solid rgba(255, 255, 255, 0.7);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.86);
+  box-shadow: var(--shadow-sm);
+  transition:
+    box-shadow 0.15s ease,
+    border-color 0.15s ease;
 }
-.import-queue-icon {
+.import-file:hover {
+  box-shadow: var(--shadow-md);
+}
+.import-file.is-error {
+  border-color: var(--danger-bg);
+  background: rgba(254, 226, 226, 0.4);
+}
+.import-file.is-done {
+  background: rgba(255, 255, 255, 0.6);
+  box-shadow: none;
+}
+/* The kind glyph doubles as the status light: the resource's own icon while it is
+   being sorted, a tick or a cross once it is settled. One place to look. */
+.import-file-glyph {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 22px;
-  color: var(--text-muted, #6b6785);
+  flex: 0 0 auto;
+  width: 30px;
+  height: 30px;
+  border-radius: 9px;
+  border: 1px solid var(--border);
+  background: var(--surface-muted);
+  color: var(--text-faint);
 }
-.import-queue-icon.is-done {
-  color: #16a34a;
+.import-file-glyph.is-known {
+  border-color: var(--accent-border);
+  background: var(--accent-bg);
+  color: var(--accent);
 }
-.import-queue-icon.is-error {
-  color: #dc2626;
+.import-file-glyph.is-ok {
+  border-color: transparent;
+  background: var(--success-bg);
+  color: var(--success);
 }
-.import-queue-name {
-  flex: 1 1 140px;
+.import-file-glyph.is-bad {
+  border-color: transparent;
+  background: var(--danger-bg);
+  color: var(--danger);
+}
+.import-file-body {
+  flex: 1 1 auto;
   min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.import-file-top {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+}
+.import-file-name {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--text);
+}
+.import-file-top .ant-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  margin: 0;
+  font-size: 11px;
+}
+.import-file-meta {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  flex-wrap: wrap;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+/* The reason detection is allowed to be confident: it says why, in the user's own
+   file's words. Truncated because a long reason must not push the card taller than
+   the three lines this layout is built for. */
+.import-file-why {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 34ch;
+}
+.import-file-progress {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin-top: 1px;
+}
+.import-file-progress .ant-progress {
+  flex: 1 1 auto;
+  margin: 0;
+  line-height: 1;
+}
+.import-file-phase {
+  flex: 0 0 auto;
+  font-size: 11.5px;
+  color: var(--accent);
   font-weight: 500;
+}
+.import-file-pick {
+  margin-top: 2px;
+}
+.import-file-pick .ant-segmented {
+  font-size: 12px;
+}
+.import-file-x {
+  flex: 0 0 auto;
+  color: var(--text-faint);
+}
+
+/* The bulk-run result. One number leads and the files explain it — twelve equal
+   lines is a log, not an answer. */
+.import-tally {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 14px 16px;
+  border: 1px solid var(--accent-border);
+  border-radius: 14px;
+  background: var(--accent-bg);
+}
+.import-tally-n {
+  font-size: 30px;
+  font-weight: 800;
+  line-height: 1;
+  background: linear-gradient(135deg, #8b83f0, #7c74e8 45%, #a855f7);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+.import-tally-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 13px;
+}
+.import-tally-sub {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+/* ------------------------------------------------------- drag-anywhere target
+   Dragging a file onto the app is the obvious gesture, and it used to do nothing
+   (worse: the browser navigated away to the file). This is the answer to "where
+   would it even go?" — shown only while the import dialog is closed, since that
+   dialog has a target of its own. */
+.dropveil {
+  position: fixed;
+  inset: 0;
+  z-index: 2000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(43, 39, 64, 0.32);
+  backdrop-filter: blur(6px);
+  animation: dropveil-in 0.16s ease-out;
+}
+.dropveil-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 34px 46px;
+  border: 2px dashed rgba(255, 255, 255, 0.85);
+  border-radius: 20px;
+  background: rgba(255, 255, 255, 0.94);
+  box-shadow: 0 30px 60px -20px rgba(43, 39, 64, 0.45);
+  text-align: center;
+  font-size: 15px;
+  color: var(--text);
+}
+.dropveil-glyph {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 58px;
+  height: 58px;
+  border-radius: 999px;
+  background: linear-gradient(135deg, #8b83f0, #7c74e8 45%, #a855f7);
+  color: #fff;
+  box-shadow: 0 10px 22px -8px rgba(124, 116, 232, 0.6);
+}
+.dropveil-hint {
+  font-size: 12.5px;
+  color: var(--text-muted);
+}
+@keyframes dropveil-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .dropveil {
+    animation: none;
+  }
+  .import-zone.is-dragging {
+    transform: none;
+  }
 }
 
 /* Step bar across the top of a review, plus "File 2/5" when part of a bulk run. */
@@ -1755,41 +2029,96 @@
   flex: 1 1 auto;
 }
 
-/* The review's answer to "what is about to happen" — four numbers, not a wall of
-   cards. Everything below it is only the rows that need a decision. */
-.import-summary-strip {
+/* Who signed this record — all of them, in form order, IT badged. Rendering only
+   the parties that disagreed with the ledger meant a three-party record showed
+   two people and quietly dropped the third. */
+.import-cast {
   display: flex;
-  gap: 8px;
   flex-wrap: wrap;
+  gap: 7px;
 }
-.import-stat {
-  display: flex;
-  align-items: baseline;
-  gap: 6px;
-  padding: 8px 12px;
-  border: 1px solid var(--accent-border);
-  border-radius: 10px;
+.import-who {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 4px 11px 4px 5px;
+  border: 1px solid var(--border, #ece9f5);
+  border-radius: 999px;
+  background: var(--surface-muted, #f7f5fd);
+  font-size: 12.5px;
+}
+.import-who-av {
+  width: 21px;
+  height: 21px;
+  border-radius: 999px;
+  display: grid;
+  place-items: center;
   background: var(--accent-bg);
-  font-size: 12px;
+  color: var(--accent);
+  font-size: 10px;
+  font-weight: 700;
+}
+.import-who.is-it {
+  background: var(--accent-bg);
+  border-color: var(--accent-border);
+}
+/* The aurora gradient earns its place here: it marks the one party the whole
+   direction logic pivots on. */
+.import-who.is-it .import-who-av {
+  background: linear-gradient(120deg, var(--accent), #d946ef);
+  color: #fff;
+}
+.import-who-name {
+  font-weight: 600;
+}
+.import-who-code {
+  font-size: 11px;
   color: var(--text-muted, #6b6785);
 }
-.import-stat b {
-  font-size: 18px;
-  color: var(--text, inherit);
-}
-.import-stat.is-warn {
-  border-color: #f0b100;
-  background: #fefce8;
-}
-.import-stat.is-warn b {
-  color: #a16207;
-}
-.import-stat.is-ok b {
+.import-who-new {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
   color: #16a34a;
+  background: #dcfce7;
+  border-radius: 999px;
+  padding: 1px 6px;
 }
-.import-it-line {
+
+/* One number leads. The other three counts are consequences of pressing Import,
+   not questions, and four equal tiles flattened the only one that was a question. */
+.import-verdict {
+  display: flex;
+  align-items: center;
+  gap: 13px;
+  padding: 12px 14px;
+  border: 1px solid #fcd34d;
+  border-radius: 12px;
+  background: #fef3c7;
+}
+.import-verdict-n {
+  font-size: 26px;
+  font-weight: 800;
+  line-height: 1;
+  color: #b45309;
+  font-variant-numeric: tabular-nums;
+}
+.import-verdict-text {
+  display: flex;
+  flex-direction: column;
+  font-size: 13.5px;
+}
+.import-verdict-sub {
   font-size: 12px;
   color: var(--text-muted, #6b6785);
+}
+.import-verdict.is-clear {
+  border-color: #86efac;
+  background: #dcfce7;
+}
+.import-verdict.is-clear .import-verdict-n {
+  color: #15803d;
 }
 
 /* Folded sections: the lines that are fine, and the dropped-cell warnings. */
@@ -1907,35 +2236,238 @@
   color: var(--text-muted, #6b6785);
 }
 
-/* One card per line item — the flow badge and its reason are the point of the
-   reconcile step, so they get the visual weight. */
-.import-item-card {
-  padding: 10px 12px;
-  border: 1px solid var(--accent-border);
-  border-radius: 10px;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
+/* One movement per row. Direction is the reason this screen exists, so it is drawn
+   rather than described — it used to be a line of muted 12px text sitting under
+   everything else, which is the bottom of the visual order for the top of the job. */
+.import-move {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 12px;
+  padding: 12px 13px;
+  border: 1px solid var(--border, #ece9f5);
+  border-radius: 12px;
+  background: var(--surface, #fff);
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04), 0 1px 3px rgba(15, 23, 42, 0.06);
 }
-.import-item-card.is-skipped {
+/* Amber means "a human still has to look at this", the same language the verdict
+   block and the provenance badge speak. */
+.import-move.needs {
+  border-color: #fcd34d;
+  background: #fffdf6;
+}
+.import-move.is-skipped {
   opacity: 0.55;
 }
-.import-item-head {
+.import-move-no {
+  width: 24px;
+  height: 24px;
+  border-radius: 999px;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--border, #ece9f5);
+  background: var(--surface-muted, #f7f5fd);
+  font-size: 11.5px;
+  font-weight: 700;
+  color: var(--text-muted, #6b6785);
+  font-variant-numeric: tabular-nums;
+}
+.import-move-body {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  min-width: 0;
+}
+.import-move-top {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.import-move-name {
+  font-weight: 600;
+  font-size: 13.5px;
+}
+.import-move-sn {
+  font-size: 11.5px;
+  color: var(--text-muted, #6b6785);
+}
+.import-move-acts {
+  margin-left: auto;
+  display: flex;
+  gap: 2px;
+}
+.import-move-note {
   display: flex;
   align-items: center;
+  gap: 7px;
+  flex-wrap: wrap;
+  font-size: 11.5px;
+  color: var(--text-muted, #6b6785);
+}
+.import-chip-new {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--accent);
+  background: var(--accent-bg);
+  border: 1px solid var(--accent-border);
+  border-radius: 999px;
+  padding: 0 7px;
+}
+
+/* Why the row points the way it does — a badge, with the resolver's full sentence
+   on hover. Fifteen rows of Vietnamese prose is not a review screen. */
+.import-prov {
+  display: inline-flex;
+  align-items: center;
+  font-size: 11px;
+  padding: 2px 8px;
+  border: 1px solid var(--accent-border);
+  border-radius: 999px;
+  background: var(--accent-bg);
+  color: var(--accent);
+  white-space: nowrap;
+  cursor: default;
+}
+.import-prov.is-ask {
+  border-color: #fcd34d;
+  background: #fef3c7;
+  color: #b45309;
+}
+
+/* giver → receiver, as a directed edge. */
+.import-edge {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  gap: 10px;
+  align-items: center;
+}
+.import-node {
+  min-width: 0;
+}
+.import-node-label {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--text-faint, #a5a1bb);
+  margin-bottom: 2px;
+}
+.import-node-name {
+  font-weight: 600;
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+.import-node-sub {
+  font-size: 11px;
+  color: var(--text-muted, #6b6785);
+}
+/* Editable ends (three parties or more) read as the name, not as a form control,
+   until you reach for them. */
+.import-node-pick.ant-select {
+  margin-left: -8px;
+  min-width: 130px;
+  max-width: 100%;
+}
+.import-node-pick .ant-select-selector {
+  font-weight: 600;
+  font-size: 13px;
+}
+.import-node-pick .ant-select-selection-item {
+  color: var(--accent);
+}
+.import-node.is-empty .import-node-pick .ant-select-selection-placeholder {
+  color: #b45309;
+}
+
+.import-arrow {
+  display: grid;
+  place-items: center;
+  gap: 3px;
+  padding: 0 2px;
+}
+.import-arrow-cap {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: var(--text-muted, #6b6785);
+  white-space: nowrap;
+}
+.import-arrow-bar {
+  position: relative;
+  width: 58px;
+  max-width: 100%;
+  height: 2px;
+  border-radius: 2px;
+  background: linear-gradient(90deg, var(--accent), #d946ef);
+}
+.import-arrow-bar::after {
+  content: "";
+  position: absolute;
+  right: -1px;
+  top: 50%;
+  width: 7px;
+  height: 7px;
+  border-top: 2px solid #d946ef;
+  border-right: 2px solid #d946ef;
+  transform: translateY(-50%) rotate(45deg);
+}
+/* Colour carries the flow, so the row needs no separate flow tag competing for
+   attention: violet leaves IT, amber comes back to it. */
+.import-arrow.is-return .import-arrow-bar {
+  background: #d97706;
+}
+.import-arrow.is-return .import-arrow-bar::after {
+  border-color: #d97706;
+}
+.import-arrow.is-return .import-arrow-cap {
+  color: #b45309;
+}
+
+/* A question, shaped like a question. */
+.import-ask {
+  padding: 11px 13px;
+  border: 1px solid #fcd34d;
+  border-radius: 12px;
+  background: #fffdf6;
+  display: flex;
+  flex-direction: column;
   gap: 8px;
+}
+.import-ask-who {
+  display: flex;
+  align-items: center;
+  gap: 7px;
   flex-wrap: wrap;
   font-size: 13px;
 }
-.import-item-actions {
-  margin-left: auto;
-  display: flex;
-  gap: 6px;
+/* Scoped: the same rows are reused by the Notifications dialog, which is opened
+   deliberately and can afford the roomier default layout. */
+.import-ask .conflict-row,
+.import-move .conflict-row {
+  gap: 4px;
 }
-.import-item-reason,
-.import-item-effect {
-  font-size: 12px;
-  color: var(--text-muted, #6b6785);
+.import-ask .conflict-rows .ant-radio-wrapper,
+.import-move .conflict-rows .ant-radio-wrapper {
+  font-size: 12.5px;
+}
+
+@media (max-width: 560px) {
+  /* The arrow cannot survive three columns on a phone; stack and let the labels
+     carry the direction instead. */
+  .import-edge {
+    grid-template-columns: 1fr;
+    gap: 6px;
+  }
+  .import-arrow {
+    grid-auto-flow: column;
+    justify-content: start;
+    gap: 8px;
+  }
+  .import-arrow-bar {
+    width: 40px;
+  }
 }
 /* A disagreement, settled where it is read. This used to be a one-line row with a
    button that stacked a modal on the modal; the radio rows now sit inside it. */

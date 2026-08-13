@@ -186,6 +186,41 @@ returns the SPA. Both handlers must be `handle` blocks.
   serials (`ON CONFLICT DO NOTHING`) so re-imports are idempotent. The Import
   button parses xlsx/csv client-side with `xlsx` (`ImportDevicesModal`); columns
   are matched to fields by normalized header name.
+- **Reading a handover record does not start with the LLM.** `POST
+  /imports/handover/read` tries `be/handover_sheet.py` first — the company template
+  is a fixed form (bilingual labels left of their values, one item table whose
+  header carries `SERIAL`), so it is a parse, not a judgement call. Measured on the
+  live `llama3.1:8b`, the same fifteen-row record takes **0.2s** parsed and **68s**
+  through the model. The model still reads a scan, a photo or an off-template file,
+  and the screen offers "read again with AI" (`reader: "llm"` on the request) for a
+  parse that looks wrong. Two things make the fast path safe and must stay: every
+  value still goes through `handover_import.verify_parsed`, and
+  `handover_sheet.read_sheet` returns **None rather than a partial answer** — its
+  item count has to equal the numbered rows the table actually has, so a template
+  that changed hands the file to the model instead of importing eight rows of
+  fifteen in silence. Never "fix" that guard by making it lenient.
+- **The import wait is reported, not spun.** Both slow import endpoints are written
+  once as a generator of `{"phase": …}` events; the plain endpoint drains it, the
+  `/stream` twin forwards it as SSE through `_event_stream`. `/imports/detect/stream`
+  runs `extract → matching → asking → done`; `/imports/handover/read/stream` runs
+  `extract → scanning → loading → reading(items/total) → verifying → done`. A
+  failure arrives as a `{phase:"error"}` event, never a status code — the 200 is
+  already sent by the time the work runs, so a client that ignores that event waits
+  forever. `reading` is the only counted phase and its denominator comes off the
+  file's own table (`count_item_rows`), so the bar is never on a timer. `loading` is
+  Ollama pulling the model into VRAM: it drops the weights after
+  `OLLAMA_KEEP_ALIVE` (10m) and llama3.1:8b costs **~44s** to load, which is why the
+  import dialog fires `POST /imports/llm/warm` when it opens and why that phase is
+  named on screen instead of hidden behind a spinner.
+- **Dropping a file anywhere in the window imports it.** `lib/useFileDrop.ts`
+  watches `window`, and `App.tsx` opens the auto-detecting importer with whatever
+  was dropped (`incoming={{files, at}}` — `at` is the trigger, so a second drop onto
+  the already-open dialog appends instead of looking like no change). The
+  `dragover` `preventDefault()` on `window` is **not** cosmetic: without it the
+  browser handles the drop by navigating to the file, discarding any open dialog.
+  The dialog's own drop zone therefore has no `onDrop` — one handler, or every file
+  is added twice — only the highlight. The full-window target is hidden while the
+  dialog is open, since the dialog has its own.
 - **Paginated tables.** `GET /<resource>/page` returns `{rows, total}`; the
   `usePagedList` hook drives an Ant `<Table>` (sort/search/paginate/trash).
 - **Keyword search reaches the owner.** A row stores its owner as an

@@ -285,8 +285,14 @@ Make an image's base64 (PowerShell): `[Convert]::ToBase64String([IO.File]::ReadA
   faster vision. base64 inflates size by ~33%.
 - **`stream: true`**: OpenAI returns SSE `data:{...}`; Ollama returns NDJSON per line;
   `/rag/chat` streams `{delta}` … `{sources}` … `[DONE]`.
-- **Shared 8GB VRAM**: switching models makes the first call ~6s slower (reloading into
-  VRAM). A model leaves VRAM after 30 min (`OLLAMA_KEEP_ALIVE`).
+- **Shared 8GB VRAM**: a model leaves VRAM after **10 min** idle
+  (`OLLAMA_KEEP_ALIVE` in `D:\LLM\compose.yml` — this said 30 min, which the compose
+  file does not agree with). Reloading is **not** the ~6s that switching between two
+  resident models costs: measured 2026-08-13, a cold `llama3.1:8b` takes **~44s to
+  first token**, against 0.6s warm. Generation then runs ~47 tok/s. So any feature
+  where a person is waiting should `POST /v1/chat/completions` with `max_tokens: 1`
+  as soon as it knows it will need the model — that is what `be/llm.warm()` and
+  `POST /imports/llm/warm` are for. Check what is resident with `GET /api/ps`.
 - **Concurrency**: Ollama parallelism is limited → extra requests queue, latency rises.
 - Use `127.0.0.1` → `192.168.3.252` to call from another LAN machine; once public, switch
   to `https://<hostname-ddns>`.

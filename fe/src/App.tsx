@@ -22,6 +22,7 @@ import { NotificationScreen } from "./components/NotificationScreen";
 import { ImportModal } from "./components/Modal/ImportModal";
 import type { ImportKind } from "./components/Modal/ImportModal";
 import { countOpenIssues } from "./api/imports";
+import { useWindowFileDrop } from "./lib/useFileDrop";
 import { AssistantModal } from "./components/Modal/AssistantModal";
 import { CreateDeviceModal } from "./components/Modal/CreateDeviceModal";
 import MaintenanceModal from "./components/Modal/MaintenanceModal";
@@ -100,6 +101,19 @@ function App() {
   // three. The chat itself is stored per browser session, so moving between tabs
   // no longer loses it either.
   const [showAssistant, setShowAssistant] = useState(false);
+
+  // Files dragged onto the window, handed to the importer. `at` is the trigger, not
+  // the array: dropping a second batch onto the already-open dialog has to append,
+  // and a fresh array with the same contents would otherwise look like no change.
+  const [dropped, setDropped] = useState<{ files: File[]; at: number } | null>(null);
+  const takeDroppedFiles = useCallback((files: File[]) => {
+    setDropped({ files, at: Date.now() });
+    // Anything dragged in wants the auto-detecting front door. Choosing a kind from
+    // the header dropdown is a deliberate act; dragging a file is not, so guessing
+    // "device list" for a handover record would be the wrong default.
+    setImportKind((open) => open ?? "auto");
+  }, []);
+  const draggingFile = useWindowFileDrop(takeDroppedFiles);
 
   const [openIssues, setOpenIssues] = useState(0);
   const refreshIssueCount = useCallback(() => {
@@ -354,10 +368,29 @@ function App() {
         onClose={() => setShowAssistant(false)}
       />
 
+      {/* The drag target. Only shown when the dialog is CLOSED — once it is open it
+          has its own drop zone, and two overlapping "drop here" surfaces is one
+          more than anybody needs. */}
+      {draggingFile && !importKind && (
+        <div className="dropveil" aria-hidden>
+          <div className="dropveil-card">
+            <span className="dropveil-glyph">
+              <UploadIcon size={30} />
+            </span>
+            <b>{t("drop.title")}</b>
+            <span className="dropveil-hint">{t("drop.hint")}</span>
+          </div>
+        </div>
+      )}
+
       {importKind && (
         <ImportModal
           kind={importKind}
-          onClose={() => setImportKind(null)}
+          incoming={dropped}
+          onClose={() => {
+            setImportKind(null);
+            setDropped(null);
+          }}
           onDone={() => {
             // An import can touch every resource and can log issues, so refresh
             // the lot rather than guessing which screen changed.

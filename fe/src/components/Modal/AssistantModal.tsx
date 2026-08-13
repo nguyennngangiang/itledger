@@ -297,7 +297,9 @@ export function AssistantModal({
       {importing && (
         <ImportModal
           kind="auto"
-          initialFile={importing}
+          // `at` is a constant: this hands the importer one file, once. A changing
+          // value would re-add it on every render of the chat behind it.
+          incoming={{ files: [importing], at: 0 }}
           onClose={() => setImporting(null)}
           onDone={() => setAnswered([])}
         />

@@ -1,6 +1,4 @@
-"""Handover-minutes import logic: verify what the LLM read, then decide direction.
-
-Two jobs, both deliberately kept out of the LLM's hands:
+"""Handover-minutes import: verify what the LLM read, and the rules around it.
 
 **Verification.** `verify_parsed()` checks every string the model returned against
 the source text it was given. The model's job is to locate fields in a bilingual
@@ -8,16 +6,18 @@ form and split a spec sentence — not to produce values. Anything that isn't
 actually in the file is dropped with a warning, so a hallucinated serial can never
 reach the database.
 
-**Direction.** `decide_flow()` works out, per line item, whether the machine is
-going out to a person or coming back to IT. The minutes cannot tell us: Bên A /
-Bên B are just "the two parties", and one record routinely mixes both directions
-(row 1 the old machine coming back, row 2 the new one going out) — while plenty of
-records only hand one machine out and have no return row at all. So each row is
-classified independently, from the ledger's own history, and the UI shows the
-reason and lets a human flip it.
+A record is **N parties and M movements**, not a pair and a list: `parties` is
+whatever `Bên A / Bên B / Bên C …` blocks the form actually carries, and each item
+gets a `row` — its position — because a record may move the same device twice and
+the serial is then not an identity.
 
-Getting direction wrong corrupts ownership, which is why it is ordered plain code
-here rather than a model's judgement call.
+**Direction** lives next door in `be/handover_direction.py`, as a chain of
+resolvers over one movement at a time. It is ordered plain code rather than a
+model's judgement call because getting it wrong corrupts ownership.
+
+What is left here besides verification is the shared vocabulary that both the
+importer and the handover *form* read: the flow constants, `status_after`, and the
+`looks_like_return` / `store_recipient` pair.
 """
 import unicodedata
 from datetime import date
@@ -50,6 +50,8 @@ def fold(value: object) -> str:
 
 # Fields on a party / item that must appear verbatim in the source text.
 _PARTY_FIELDS = ("name", "code", "dept", "position")
+# Fallback labels when the form's own `Bên X` letter didn't survive the read.
+_PARTY_LABELS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
 _ITEM_TEXT_FIELDS = ("item", "detail", "serial", "note")
 _DEVICE_FIELDS = ("type", "brand", "cpu", "ram", "storage", "name")
 
@@ -80,6 +82,34 @@ def _verify_party(party: object, folded_source: str, label: str, warnings: list[
         f: _keep_if_present(party.get(f), folded_source, f"{label} · {f}", warnings)
         for f in _PARTY_FIELDS
     }
+
+
+def _verify_parties(raw: object, folded_source: str, warnings: list[str]) -> list[dict]:
+    """Every `Bên X/ Party X` block the form carries — two, three or more.
+
+    A party whose every field fails verification is dropped rather than kept as a
+    row of nulls: a model asked for a list will occasionally pad one, and an empty
+    party would otherwise reach the review screen as a card with nothing on it.
+
+    The label is not checked against the source. It is a single letter, so it
+    "appears in the file" no matter what, and verifying it would mean nothing;
+    when the model omits it, position supplies it.
+    """
+    parties: list[dict] = []
+    for index, party in enumerate(raw if isinstance(raw, list) else []):
+        if not isinstance(party, dict):
+            continue
+        label = _clean(party.get("label")) or _PARTY_LABELS[index % len(_PARTY_LABELS)]
+        verified = _verify_party(party, folded_source, f"Bên {label}", warnings)
+        if not any(verified.values()):
+            warnings.append(f"Bỏ qua Bên {label}: không có thông tin nào có trong file.")
+            continue
+        parties.append({"label": label, **verified})
+    if len(parties) < 2:
+        warnings.append(
+            f"Chỉ đọc được {len(parties)} bên trong biên bản — cần ít nhất hai bên."
+        )
+    return parties
 
 
 def _verify_date(value: object, folded_source: str, warnings: list[str]) -> str | None:
@@ -123,8 +153,7 @@ def verify_parsed(parsed: dict, source_text: str) -> tuple[dict, list[str]]:
     out: dict = {
         "handover_date": _verify_date(parsed.get("handover_date"), folded, warnings),
         "place": _keep_if_present(parsed.get("place"), folded, "địa điểm", warnings),
-        "party_a": _verify_party(parsed.get("party_a"), folded, "Bên A", warnings),
-        "party_b": _verify_party(parsed.get("party_b"), folded, "Bên B", warnings),
+        "parties": _verify_parties(parsed.get("parties"), folded, warnings),
         "items": [],
     }
 
@@ -143,6 +172,11 @@ def verify_parsed(parsed: dict, source_text: str) -> tuple[dict, list[str]]:
             warnings.append(f"Bỏ qua {label}: không có SERIAL đọc được.")
             continue
         raw_device = raw.get("device") if isinstance(raw.get("device"), dict) else {}
+        # `no` is the form's own numbering, for display. `row` is the movement's
+        # identity, and is positional precisely so that it is always unique: one
+        # record can move the same device twice (A→B, then B→C), and keying those
+        # two movements on the serial merges them into one.
+        item["row"] = len(out["items"]) + 1
         item["no"] = _verify_int(raw.get("no"), index)
         item["quantity"] = _verify_int(raw.get("quantity"), 1)
         item["device"] = {
@@ -247,9 +281,9 @@ def store_recipient(
 
 
 def detect_it_side(
-    party_a: dict, party_b: dict, user_a: dict | None, user_b: dict | None
-) -> tuple[str | None, str]:
-    """Which party is the IT side: "a", "b", or None. Returns (side, reason).
+    parties: list[dict], users: list[dict | None]
+) -> tuple[int | None, str]:
+    """Which party is the IT side. Returns (index into `parties`, reason).
 
     Reads the minutes' own Chức vụ / Bộ phận first, then the ledger's stored team.
     Both are needed: VPHN228's minutes say dept Operation / position IT, while the
@@ -260,6 +294,9 @@ def detect_it_side(
     column held a title for two people out of 235 and split the signal in two —
     VPHN228 read team "Operation" / position "IT", so the team lookup scored him
     zero. His team now says IT, which is what every other rule reads too.
+
+    There is at most one IT side however many parties sign: a clear winner needs a
+    strictly highest score, so two IT-looking parties settle nothing and say so.
     """
     def score(party: dict, user: dict | None) -> int:
         points = 0
@@ -271,14 +308,22 @@ def detect_it_side(
             points += 2
         return points
 
-    a, b = score(party_a, user_a), score(party_b, user_b)
-    if a > b:
-        return "a", _it_reason("A", party_a, user_a)
-    if b > a:
-        return "b", _it_reason("B", party_b, user_b)
-    if a == 0:
+    scores = [
+        score(party, user)
+        for party, user in zip(parties, list(users) + [None] * len(parties))
+    ]
+    if not scores or max(scores) == 0:
         return None, "Không bên nào là IT — coi là chuyển máy giữa hai người dùng."
-    return None, "Cả hai bên đều trông như IT — không tự quyết được."
+    best = max(scores)
+    if scores.count(best) > 1:
+        return None, "Có nhiều bên trông như IT — không tự quyết được."
+    index = scores.index(best)
+    party = parties[index]
+    return index, _it_reason(
+        party.get("label") or _PARTY_LABELS[index % len(_PARTY_LABELS)],
+        party,
+        list(users)[index] if index < len(users) else None,
+    )
 
 
 def _it_reason(label: str, party: dict, user: dict | None) -> str:
@@ -292,144 +337,34 @@ def _it_reason(label: str, party: dict, user: dict | None) -> str:
     return f"Bên {label} là bên IT ({', '.join(bits)})."
 
 
-# ----------------------------------------------------------------- direction
+# --------------------------------------------------------- derived from a move
 
-class FlowDecision(dict):
-    """A per-item direction decision. A dict so it serialises straight to JSON."""
+def status_after(owner: str | None, current_status: str | None) -> str:
+    """Same rule as deriveStatus in fe/src/lib/format.ts.
 
-
-def _status_after(owner: str | None, current_status: str | None) -> str:
-    """Same rule as deriveStatus in fe/src/lib/format.ts."""
+    Public because be/handover_direction.py derives it for every movement it
+    resolves; the two must not drift apart.
+    """
     if owner and owner != GHOST_CODE:
         return "active"
     return current_status if current_status in IT_HELD_STATUSES else "in_stock"
 
 
-def _decision(
-    flow: str,
-    from_user: str | None,
-    to_user: str | None,
-    owner_after: str | None,
-    device: dict | None,
-    reason: str,
-    *,
-    ambiguous: bool = False,
-    duplicate_of: dict | None = None,
-) -> FlowDecision:
-    return FlowDecision(
-        flow=flow,
-        from_user_id=from_user,
-        to_user_id=to_user,
-        device_owner_after=owner_after,
-        device_status_after=_status_after(
-            owner_after, (device or {}).get("status")
-        ),
-        flow_reason=reason,
-        ambiguous=ambiguous,
-        duplicate_of=duplicate_of,
-    )
-
-
-def decide_flow(
-    *,
-    user_code: str | None,
-    it_code: str | None,
-    other_code: str | None = None,
-    device: dict | None,
-    history: list[dict],
-) -> FlowDecision:
-    """Classify one line item. Rules are tried in order; the first that fits wins.
-
-    `user_code` is the non-IT party, `it_code` the IT party (both None-able).
-    `other_code` is only used when there is no IT side, to name the second party.
-    `history` is every live handover for this device.
-    """
-    pair = {c for c in (user_code, it_code, other_code) if c}
-
-    # 1. Already recorded. Must come first: re-importing a hand-out that was
-    #    already applied leaves the machine on the receiver's name, and rule 2
-    #    would then read that as a return and silently reverse the ownership.
-    if len(pair) == 2:
-        for h in history:
-            if {h.get("from_user_id"), h.get("to_user_id")} == pair:
-                flow = RETURN if h.get("to_user_id") == it_code else ISSUE
-                owner_after = (
-                    GHOST_CODE if flow == RETURN else h.get("to_user_id")
-                )
-                return _decision(
-                    flow,
-                    h.get("from_user_id"),
-                    h.get("to_user_id"),
-                    owner_after,
-                    device,
-                    "Đã có bản ghi bàn giao cho đúng thiết bị và đúng hai người này "
-                    f"({h.get('handover_date')}) — giữ nguyên chiều đã ghi.",
-                    duplicate_of=h,
-                )
-
-    # No IT side at all: a person-to-person transfer. Whoever holds it gives it.
-    if not it_code:
-        holder = (device or {}).get("user_id")
-        first, second = user_code, other_code
-        if holder and holder == other_code:
-            first, second = other_code, user_code
-        return _decision(
-            TRANSFER, first, second, second, device,
-            "Không bên nào là IT — chuyển máy giữa hai người dùng.",
-        )
-
-    # 2. This person has held the machine before → they are giving it back.
-    #    Dates are not used to filter: hand-entered rows carry the entry date, not
-    #    the date on the minutes, so a date window would drop real history.
-    if user_code and any(
-        h.get("from_user_id") == user_code or h.get("to_user_id") == user_code
-        for h in history
-    ):
-        return _decision(
-            RETURN, user_code, it_code, GHOST_CODE, device,
-            f"{user_code} từng giữ thiết bị này trong lịch sử bàn giao → trả về IT.",
-        )
-
-    owner = (device or {}).get("user_id")
-
-    # 3. Stands in their name with nothing to explain how it got there. A return
-    #    and a hand-assigned owner look identical from here, so don't guess.
-    if owner and owner == user_code:
-        return _decision(
-            RETURN, user_code, it_code, GHOST_CODE, device,
-            f"Thiết bị đang đứng tên {user_code} nhưng không có lịch sử bàn giao "
-            "nào — chưa rõ là trả máy hay đã gán tay trước đó.",
-            ambiguous=True,
-        )
-
-    # 5. Held by someone the minutes never mention.
-    if owner and owner not in (GHOST_CODE, it_code, user_code):
-        return _decision(
-            ISSUE, it_code, user_code, user_code, device,
-            f"Thiết bị đang thuộc {owner}, không phải bên nào trong biên bản.",
-            ambiguous=True,
-        )
-
-    # 4. New machine, or sitting in the store → IT is handing it out. The common
-    #    case, including a one-line record with no return row.
-    where = "chưa có trong hệ thống" if device is None else "đang ở kho (IT-STORE)"
-    return _decision(
-        ISSUE, it_code, user_code, user_code, device,
-        f"Thiết bị {where} và {user_code or 'người nhận'} chưa từng giữ nó → "
-        "bàn giao máy đi.",
-    )
-
-
 def apply_flow(flow: str, *, user_code: str | None, it_code: str | None,
                device: dict | None) -> dict:
-    """The from/to/owner/status a flow implies — used when a human overrides the
-    inferred direction, so the override goes through the same rule as the guess."""
+    """The from/to/owner/status a bare flow implies, for a two-party record.
+
+    `apply` prefers the movement's own `from_user_id` / `to_user_id`, which is the
+    only thing that can describe a record with three parties. This stays for the
+    two-party case, where naming a flow does still pin the pair down, so a caller
+    that sends `{"flow": "return"}` and nothing else is still understood.
+    """
     if flow == RETURN:
         return {
             "from_user_id": user_code,
             "to_user_id": it_code,
             "device_owner_after": GHOST_CODE,
-            "device_status_after": _status_after(
+            "device_status_after": status_after(
                 GHOST_CODE, (device or {}).get("status")
             ),
         }
@@ -437,7 +372,7 @@ def apply_flow(flow: str, *, user_code: str | None, it_code: str | None,
         "from_user_id": it_code,
         "to_user_id": user_code,
         "device_owner_after": user_code,
-        "device_status_after": _status_after(
+        "device_status_after": status_after(
             user_code, (device or {}).get("status")
         ),
     }

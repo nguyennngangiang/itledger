@@ -7,20 +7,37 @@ what will happen:
   POST /imports/handover/plan   fields → what would change (read-only)
   POST /imports/handover/apply  decisions → writes         (one transaction)
 
-`read` uses the LLM (be/llm.read_handover_minutes) to locate fields in the
-bilingual form, then throws away anything that isn't actually in the file. `plan`
-reconciles against the ledger and works out each line's direction in plain code.
-`apply` executes the decisions the user confirmed and logs whatever is still
-unsettled to import_issues, which backs the Notifications screen.
+`read` tries `be/handover_sheet.py` first — the company template is a fixed form,
+and parsing it costs under a millisecond against the ~25s warm (~70s cold) an 8B
+model takes — and falls back to the LLM (`be/llm.read_handover_minutes`) for a
+scan, a photo, or an off-template file. Either way it throws away anything that
+isn't actually in the file. `plan` reconciles against the ledger and works out each
+line's direction in plain code. `apply` executes the decisions the user confirmed
+and logs whatever is still unsettled to import_issues, which backs the
+Notifications screen.
+
+`read` exists twice over ONE implementation (`_read_events`): the plain endpoint
+drains it and answers once, `/read/stream` forwards each step as SSE so the screen
+can show a progress bar that is counting something real rather than animating.
 """
 import base64
 import binascii
+import json
 import uuid
+from collections.abc import AsyncIterator
 
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
-from .. import extract, handover_import, import_detect, llm
+from .. import (
+    extract,
+    handover_direction,
+    handover_import,
+    handover_sheet,
+    import_detect,
+    llm,
+)
 from ..db import get_pool
 from ..handover_import import GHOST_CODE, ISSUE, RETURN, TRANSFER
 from ..models.device import DeviceCreate, DeviceUpdate
@@ -56,18 +73,29 @@ class ReadRequest(BaseModel):
     """Either the sheet already flattened in the browser, or a file to extract."""
     sheet_text: str | None = None
     attachment: Attachment | None = None
+    # "auto" reads the form in plain code when it can and asks the model when it
+    # can't. "llm" skips straight to the model — what the screen's "read with AI
+    # instead" retry sends when a parse came back looking wrong.
+    reader: str = "auto"
 
 
 class ReadResult(BaseModel):
     parsed: dict
     warnings: list[str] = []
     source_text: str
+    # Which of the two read it, so the screen can say so — a record read in plain
+    # code and one read by an 8B model do not deserve the same amount of trust.
+    reader: str = "llm"
+    # Numbered rows the file's own item table has. The denominator of the progress
+    # bar, and worth reporting even on the fast path: it is what says "1 of 15 read"
+    # rather than "reading…".
+    item_rows: int = 0
 
 
 class PlanRequest(BaseModel):
     parsed: dict
     source_file: str | None = None
-    it_side: str | None = None  # "a" | "b" | None — user override of the guess
+    it_index: int | None = None  # index into parsed["parties"] — user override
 
 
 class UserDecision(BaseModel):
@@ -78,8 +106,19 @@ class UserDecision(BaseModel):
 
 
 class ItemDecision(BaseModel):
+    """One movement the operator confirmed.
+
+    `from_user_id` / `to_user_id` are the authoritative pair — they are the only
+    thing that can describe a record with three parties, where "the flow" no
+    longer pins down who is at each end. `flow` is re-derived from them and is
+    read directly only for `"skip"` and for a two-party caller that sends nothing
+    else.
+    """
     serial: str
     flow: str  # return | issue | transfer | skip
+    row: int | None = None
+    from_user_id: str | None = None
+    to_user_id: str | None = None
     handover_id: str | None = None
     handover_date: str | None = None
     reason: str | None = None
@@ -90,9 +129,8 @@ class ItemDecision(BaseModel):
 class ApplyRequest(BaseModel):
     source_file: str | None = None
     handover_date: str | None = None
-    party_a_code: str | None = None
-    party_b_code: str | None = None
-    it_side: str | None = None
+    party_codes: list[str] = []
+    it_code: str | None = None
     users: list[UserDecision] = []
     items: list[ItemDecision] = []
     issues: list[dict] = []  # left unresolved by the user → logged as open
@@ -138,12 +176,82 @@ async def _source_text(req: ReadRequest) -> str:
     return text
 
 
+# --------------------------------------------------------- progress, as events
+#
+# Both slow endpoints here are written once, as a generator of `{"phase": …}` events
+# ending in `{"phase": "done", "result": …}`. The plain endpoint drains it and
+# answers once; the `/stream` twin forwards each event as SSE. Neither duplicates
+# the other's logic, so a phase cannot exist in one and not the other.
+#
+# What earns the machinery is that these waits are long and lumpy. A scanned record
+# is OCR'd for tens of seconds; a cold model spends ~44s loading before it writes a
+# character. A spinner cannot tell either of those from a hang.
+
+EXTRACT = "extract"    # uploading + OCR'ing a PDF or a photo
+MATCHING = "matching"  # keyword/header heuristics — instant
+ASKING = "asking"      # the heuristics were unsure, so the model is being asked
+
+
+def _sse(event: dict) -> str:
+    return f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
+
+
+def _event_stream(events: AsyncIterator[dict]) -> StreamingResponse:
+    """Forward a phase generator as Server-Sent Events.
+
+    An HTTPException has to be delivered as an event rather than a status code: the
+    200 was sent before the first phase ran. A client that ignored that would wait
+    forever on a file the server had already rejected.
+    """
+    async def body() -> AsyncIterator[str]:
+        try:
+            async for event in events:
+                yield _sse(event)
+        except HTTPException as e:
+            yield _sse({"phase": "error", "status": e.status_code, "detail": e.detail})
+
+    return StreamingResponse(
+        body(),
+        media_type="text/event-stream",
+        # Caddy fronts this in production. It does not buffer proxied responses by
+        # default and the stream was verified arriving event-by-event through it,
+        # but the hint costs nothing and says what the endpoint needs.
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
 class DetectResult(BaseModel):
     kind: str
     reason: str
     confident: bool
     used_llm: bool = False
     source_text: str
+
+
+async def _detect_events(req: ReadRequest) -> AsyncIterator[dict]:
+    """`detect_import_kind`, reporting each step. One implementation, two transports.
+
+    Worth streaming for the same reason the read is: on a PDF or a photo the
+    `extract` phase is an OCR pass that can run for tens of seconds, and it happens
+    HERE rather than during the read — the extracted text is handed on so a scan is
+    never OCR'd twice. A queue row spinning silently through that is the longest
+    unexplained wait left in the importer.
+    """
+    if req.attachment is not None and not (req.sheet_text or "").strip():
+        yield {"phase": EXTRACT, "name": req.attachment.name}
+    source_text = await _source_text(req)
+
+    yield {"phase": MATCHING}
+    result = import_detect.detect_kind(source_text)
+    used_llm = False
+    if not result["confident"]:
+        yield {"phase": ASKING}
+        result = await import_detect.detect_kind_with_llm(source_text, llm._chat)
+        used_llm = True
+    yield {
+        "phase": "done",
+        "result": {**result, "used_llm": used_llm, "source_text": source_text},
+    }
 
 
 @router.post("/detect", response_model=DetectResult)
@@ -154,28 +262,104 @@ async def detect_import_kind(req: ReadRequest):
     unsure (see be/import_detect). The caller always shows the answer with an
     override, so being wrong costs one click rather than corrupting anything.
     """
+    async for event in _detect_events(req):
+        if event["phase"] == "done":
+            return event["result"]
+    raise HTTPException(422, "Không nhận dạng được file này.")
+
+
+@router.post("/detect/stream")
+async def detect_import_kind_stream(req: ReadRequest):
+    """The same detection, as SSE, so a queue row can say what it is waiting on."""
+    return _event_stream(_detect_events(req))
+
+
+# Steps a read passes through, in the order they happen. `extract` and the two LLM
+# phases are the slow ones and are the reason this is reported at all: a scan is
+# OCR'd for tens of seconds, and a cold model spends ~44s in `loading` before it
+# writes a single character.
+SCANNING = "scanning"  # locating the form's own table; `total` is settled here
+VERIFYING = "verifying"  # checking every value back against the file
+NO_READING = "Không đọc được biên bản: dịch vụ AI không phản hồi. Thử lại sau."
+
+
+async def _read_events(req: ReadRequest) -> AsyncIterator[dict]:
+    """Read a handover record into fields, reporting each step as it goes.
+
+    The single implementation behind both read endpoints. Reads nothing from and
+    writes nothing to the database — pure file → JSON. Every event carries `phase`;
+    the last one is `{"phase": "done", "result": …}`.
+
+    May raise HTTPException, which is right for the plain endpoint and is why
+    `_read_stream` has to catch it: a streaming response has already sent 200 by
+    the time the body is being produced.
+    """
+    if req.attachment is not None and not (req.sheet_text or "").strip():
+        # Only worth announcing when there is something to extract — a spreadsheet
+        # was flattened in the browser and arrives as text.
+        yield {"phase": EXTRACT, "name": req.attachment.name}
     source_text = await _source_text(req)
-    result = import_detect.detect_kind(source_text)
-    used_llm = False
-    if not result["confident"]:
-        result = await import_detect.detect_kind_with_llm(source_text, llm._chat)
-        used_llm = True
-    return {**result, "used_llm": used_llm, "source_text": source_text}
+
+    total = handover_sheet.count_item_rows(source_text)
+    yield {"phase": SCANNING, "total": total}
+
+    reader = "sheet"
+    raw = None if req.reader == "llm" else handover_sheet.read_sheet(source_text)
+    if raw is None:
+        reader = "llm"
+        async for event in llm.read_handover_minutes_stream(source_text):
+            if event["phase"] == llm.DONE:
+                raw = event["parsed"]
+            else:
+                yield {**event, "total": total}
+    if not raw:
+        raise HTTPException(503, NO_READING)
+
+    yield {"phase": VERIFYING, "total": total}
+    parsed, warnings = handover_import.verify_parsed(raw, source_text)
+    yield {
+        "phase": "done",
+        "result": {
+            "parsed": parsed,
+            "warnings": warnings,
+            "source_text": source_text,
+            "reader": reader,
+            "item_rows": total,
+        },
+    }
 
 
 @router.post("/handover/read", response_model=ReadResult)
 async def read_handover(req: ReadRequest):
     """Read a handover record into fields. Reads nothing from and writes nothing
     to the database — pure file → JSON."""
-    source_text = await _source_text(req)
-    raw = await llm.read_handover_minutes(source_text)
-    if not raw:
-        raise HTTPException(
-            503,
-            "Không đọc được biên bản: dịch vụ AI không phản hồi. Thử lại sau.",
-        )
-    parsed, warnings = handover_import.verify_parsed(raw, source_text)
-    return {"parsed": parsed, "warnings": warnings, "source_text": source_text}
+    async for event in _read_events(req):
+        if event["phase"] == "done":
+            return event["result"]
+    raise HTTPException(503, NO_READING)
+
+
+@router.post("/handover/read/stream")
+async def read_handover_stream(req: ReadRequest):
+    """The same read, as SSE, so the screen can show progress rather than a spinner.
+
+    Reading a record is the longest wait in this importer: tens of seconds for a
+    scan, and up to ~70s for a fifteen-row record if the model has to be loaded
+    first.
+    """
+    return _event_stream(_read_events(req))
+
+
+@router.post("/llm/warm")
+async def warm_llm():
+    """Ask the model server to make the model resident. Fire-and-forget.
+
+    Ollama drops the weights after ten idle minutes and loading llama3.1:8b costs
+    ~44 seconds, which the first import of the morning paid in full before reading
+    a single field. The import dialog calls this when it opens, so the load overlaps
+    the time a human spends choosing a file. Never fails the caller.
+    """
+    return {"warm": await llm.warm()}
 
 
 # ----------------------------------------------------------------------- plan
@@ -276,8 +460,15 @@ async def _namesakes(pool, name: str | None, code: str | None) -> list[dict]:
     ]
 
 
-async def _plan_user(pool, party: dict, label: str, teams: list[str]) -> dict:
-    """Reconcile one party against the ledger. Read-only."""
+async def _plan_user(
+    pool, party: dict, label: str, teams: list[str], current: dict | None
+) -> dict:
+    """Reconcile one party against the ledger. Read-only.
+
+    `current` is the party's stored row, fetched in bulk by the caller — a record
+    can carry any number of parties, and re-reading each one here made that a
+    query per signature.
+    """
     code = party.get("code")
     # The minutes also carry Chức vụ, but there is nowhere to put it: the users
     # table stores a department, not a job title. It still decides which party is
@@ -306,7 +497,6 @@ async def _plan_user(pool, party: dict, label: str, teams: list[str]) -> dict:
         })
         return plan
 
-    current = await user_repo.get(pool, code)
     # A code that looks mistyped for someone with the same name — never merged
     # automatically, and never passed over in silence either.
     namesakes = await _namesakes(pool, party.get("name"), code)
@@ -352,29 +542,26 @@ async def _plan_user(pool, party: dict, label: str, teams: list[str]) -> dict:
     return plan
 
 
-def _plan_item(
-    item: dict, *, user_code, it_code, other_code, devices: dict, histories: dict
-) -> dict:
-    """Reconcile one line item and decide its direction. Read-only.
+def _plan_item(item: dict, *, ctx: handover_direction.Context, row: int) -> dict:
+    """Reconcile one movement and resolve its direction. Read-only.
 
-    Takes the device and its history rather than fetching them, so a record's rows
-    cost two queries between them instead of two each — see plan_handover.
+    Takes the ledger state through `ctx` rather than fetching it, so a record's
+    rows cost two queries between them instead of two each — and so that the
+    second movement of one device can be handed the first one's effect. See
+    plan_handover.
     """
     serial = item["serial"]
-    device = devices.get(serial)
-    history = histories.get(serial, [])
-    decision = handover_import.decide_flow(
-        user_code=user_code,
-        it_code=it_code,
-        other_code=other_code,
-        device=device,
-        history=history,
+    device = ctx.device
+    decision = handover_direction.decide(
+        ctx,
+        handover_direction.Movement(row=row, serial=serial, note=item.get("note")),
     )
     proposed_device = {
         f: item.get("device", {}).get(f) for f in MINUTES_DEVICE_FIELDS
     }
     plan = {
         **decision,
+        "row": row,
         "no": item.get("no"),
         "serial": serial,
         "note": item.get("note"),
@@ -396,6 +583,7 @@ def _plan_item(
             "resource": "devices",
             "item_id": serial,
             "payload": {
+                "row": row,
                 "serial": serial,
                 "created_from": proposed_device,
                 "missing": list(COMPLETION_FIELDS),
@@ -409,7 +597,7 @@ def _plan_item(
                 "kind": "device_field_conflict",
                 "resource": "devices",
                 "item_id": serial,
-                "payload": {"serial": serial, "fields": conflicts},
+                "payload": {"row": row, "serial": serial, "fields": conflicts},
             })
         if fills or conflicts:
             plan["device_action"] = "update"
@@ -420,6 +608,7 @@ def _plan_item(
             "resource": "handovers",
             "item_id": serial,
             "payload": {
+                "row": row,
                 "serial": serial,
                 "existing": decision["duplicate_of"],
                 "proposed_date": item.get("_date"),
@@ -431,9 +620,11 @@ def _plan_item(
             "resource": "handovers",
             "item_id": serial,
             "payload": {
+                "row": row,
                 "serial": serial,
                 "reason": decision.get("flow_reason"),
                 "guess": decision.get("flow"),
+                "source": decision.get("direction_source"),
             },
         })
     return plan
@@ -443,64 +634,119 @@ def _plan_item(
 async def plan_handover(req: PlanRequest, pool=Depends(get_pool)):
     """What importing this record would do. Writes nothing."""
     parsed = req.parsed or {}
-    party_a = parsed.get("party_a") or {}
-    party_b = parsed.get("party_b") or {}
-    user_a = await user_repo.get(pool, party_a["code"]) if party_a.get("code") else None
-    user_b = await user_repo.get(pool, party_b["code"]) if party_b.get("code") else None
+    raw_parties = [p for p in (parsed.get("parties") or []) if isinstance(p, dict)]
 
-    if req.it_side in ("a", "b"):
-        it_side, it_reason = req.it_side, "Bên IT do người dùng chọn."
+    # One round trip for every party, however many signed.
+    stored = await user_repo.get_many(
+        pool, [p["code"] for p in raw_parties if p.get("code")]
+    )
+    party_users = [stored.get(p.get("code")) if p.get("code") else None
+                   for p in raw_parties]
+
+    if req.it_index is not None and 0 <= req.it_index < len(raw_parties):
+        it_index, it_reason = req.it_index, "Bên IT do người dùng chọn."
     else:
-        it_side, it_reason = handover_import.detect_it_side(
-            party_a, party_b, user_a, user_b
+        it_index, it_reason = handover_import.detect_it_side(raw_parties, party_users)
+    it_code = raw_parties[it_index].get("code") if it_index is not None else None
+
+    parties = tuple(
+        handover_direction.Party(
+            label=p.get("label") or "?",
+            code=p.get("code"),
+            name=p.get("name"),
+            dept=p.get("dept"),
+            position=p.get("position"),
         )
-
-    it_code = (party_a if it_side == "a" else party_b).get("code") if it_side else None
-    if it_side == "a":
-        user_code, other_code = party_b.get("code"), None
-    elif it_side == "b":
-        user_code, other_code = party_a.get("code"), None
-    else:
-        user_code, other_code = party_a.get("code"), party_b.get("code")
+        for p in raw_parties
+    )
 
     teams = await user_repo.list_teams(pool)
-    users = [
-        await _plan_user(pool, party_a, "Bên A", teams),
-        await _plan_user(pool, party_b, "Bên B", teams),
+    party_plans = [
+        await _plan_user(pool, p, f"Bên {p.get('label') or '?'}", teams, stored_user)
+        for p, stored_user in zip(raw_parties, party_users)
     ]
 
-    raw_items = parsed.get("items") or []
-    serials = [i["serial"] for i in raw_items if i.get("serial")]
+    raw_items = [i for i in (parsed.get("items") or []) if i.get("serial")]
+    serials = [i["serial"] for i in raw_items]
     devices = await device_repo.get_many(pool, serials)
     histories = await handover_repo.list_by_devices(pool, serials)
-    items = [
-        _plan_item(
+
+    # Movements are planned in row order against state that carries forward, so a
+    # record moving one device twice (A→B, then B→C) reads B as the second row's
+    # giver instead of planning both rows from the same starting row.
+    #
+    # Only the DEVICE is threaded, never the pending handover: feeding row 1's own
+    # row into row 2's history would make row 2 report itself as already recorded
+    # and freeze the direction it was about to be given.
+    items = []
+    for index, raw in enumerate(raw_items, start=1):
+        serial = raw["serial"]
+        row = raw.get("row") or index
+        item = _plan_item(
             {**raw, "_date": parsed.get("handover_date")},
-            user_code=user_code,
-            it_code=it_code,
-            other_code=other_code,
-            devices=devices,
-            histories=histories,
+            ctx=handover_direction.Context(
+                parties=parties,
+                it_code=it_code,
+                device=devices.get(serial),
+                history=tuple(histories.get(serial, [])),
+            ),
+            row=row,
         )
-        for raw in raw_items
-    ]
+        items.append(item)
+        devices[serial] = {
+            **(devices.get(serial) or {"serial_number": serial}),
+            **item["device_fills"],
+            "user_id": item["device_owner_after"],
+            "status": item["device_status_after"],
+        }
 
     return {
         "source_file": req.source_file,
         "handover_date": parsed.get("handover_date"),
         "place": parsed.get("place"),
-        "it_side": it_side,
+        "it_index": it_index,
         "it_reason": it_reason,
         "it_code": it_code,
-        "user_code": user_code,
-        "users": users,
+        "parties": party_plans,
         "items": items,
-        "issue_count": sum(len(u["issues"]) for u in users)
+        "issue_count": sum(len(p["issues"]) for p in party_plans)
         + sum(len(i["issues"]) for i in items),
     }
 
 
 # ---------------------------------------------------------------------- apply
+
+def _written_state(
+    req: ApplyRequest, item: ItemDecision, device: dict | None
+) -> tuple[dict, str]:
+    """The handover row and device state one confirmed movement implies.
+
+    The movement's own `from`/`to` win, and the flow is re-derived from them — a
+    client never gets to name the owner. When only a flow arrives (a two-party
+    caller, where naming the flow does still pin the pair down) the counterpart is
+    the record's single non-IT party.
+    """
+    from_code, to_code = item.from_user_id, item.to_user_id
+    if not (from_code or to_code):
+        others = [c for c in req.party_codes if c and c != req.it_code]
+        after = handover_import.apply_flow(
+            item.flow,
+            user_code=others[0] if len(others) == 1 else None,
+            it_code=req.it_code,
+            device=device,
+        )
+        return after, item.flow
+
+    owner = handover_direction.owner_after(to_code, req.it_code, device)
+    return {
+        "from_user_id": from_code,
+        "to_user_id": to_code,
+        "device_owner_after": owner,
+        "device_status_after": handover_import.status_after(
+            owner, (device or {}).get("status")
+        ),
+    }, handover_direction.flow_of(from_code, to_code, req.it_code)
+
 
 @router.post("/handover/apply", response_model=ApplyResult)
 async def apply_handover(req: ApplyRequest, pool=Depends(get_pool)):
@@ -576,19 +822,11 @@ async def apply_handover(req: ApplyRequest, pool=Depends(get_pool)):
                 # `device` is the row we just wrote (or `current`, untouched) —
                 # re-reading it here was a wasted round-trip per line item and a
                 # read-your-own-write hazard for no gain.
-                after = handover_import.apply_flow(
-                    item.flow,
-                    user_code=req.party_b_code if req.it_side == "a" else req.party_a_code,
-                    it_code=req.party_a_code if req.it_side == "a" else req.party_b_code,
-                    device=device,
-                )
-                if item.flow == TRANSFER:
-                    after = {
-                        "from_user_id": req.party_a_code,
-                        "to_user_id": req.party_b_code,
-                        "device_owner_after": req.party_b_code,
-                        "device_status_after": "active",
-                    }
+                #
+                # The movement's own pair is authoritative. It used to be
+                # recomputed here from one record-level pair, which is what wrote
+                # every row of a three-party record between the same two people.
+                after, flow = _written_state(req, item, device)
 
                 await handover_repo.create(conn, HandoverCreate(
                     handover_id=item.handover_id or str(uuid.uuid4()),
@@ -596,7 +834,7 @@ async def apply_handover(req: ApplyRequest, pool=Depends(get_pool)):
                     device_id=item.serial,
                     from_user_id=after["from_user_id"],
                     to_user_id=after["to_user_id"],
-                    reason=(item.reason or _default_reason(item.flow))[:100],
+                    reason=(item.reason or _default_reason(flow))[:100],
                 ))
                 result.handovers_created += 1
 

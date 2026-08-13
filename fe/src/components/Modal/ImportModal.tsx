@@ -2,7 +2,8 @@
 //
 // Pressing "Import" in the header lands here with nothing chosen: you give it files
 // and it works out what each one IS, then walks you through them one at a time.
-// Picking a kind from the header's dropdown skips detection.
+// Picking a kind from the header's dropdown skips detection. Files dragged anywhere
+// in the window arrive here too — see lib/useFileDrop.ts and `incoming` below.
 //
 // Detection is deliberately explainable and reversible. The server answers from
 // keyword/header heuristics first — no LLM, no cost, and a reason you can read
@@ -17,14 +18,29 @@
 //
 // Each file is still its own transaction. A folder of records where the third one is
 // a mess should import the other four, not roll all five back.
+//
+// The queue is a card per file rather than a table row per file, because a file in a
+// bulk run has a story and not a value: what we think it is, why we think that, how
+// far along it is, and what it did. That did not fit on one line, and squeezing it
+// there is what made this screen read as a progress-less list of filenames.
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Alert, Button, Segmented, Spin, Tag } from "antd";
-import { detectImportKind } from "../../api/imports";
+import { Alert, Button, Progress, Segmented, Tag, Tooltip } from "antd";
+import { detectImportKindStreaming, warmLlm } from "../../api/imports";
+import type { DetectProgress } from "../../api/imports";
 import { ApiError } from "../../api/client";
 import { fileToAttachment } from "../../lib/files";
 import { fileToSheetText } from "../../lib/sheetText";
 import { newId } from "../../lib/id";
-import { CheckIcon, UploadIcon, XIcon } from "../icons";
+import { animateEntrance } from "../../lib/sparkle";
+import {
+  CheckIcon,
+  DeviceIcon,
+  HandoverIcon,
+  SparklesIcon,
+  UploadIcon,
+  WrenchIcon,
+  XIcon,
+} from "../icons";
 import { Modal } from "./Modal";
 import { ImportDevicesModal } from "./ImportDevicesModal";
 import { ImportMaintenanceModal } from "./ImportMaintenanceModal";
@@ -45,11 +61,28 @@ const KIND_LABEL: Record<ImportKind, Key> = {
   handover_minutes: "importKind.handover_minutes",
 };
 
+/** Each kind gets the same glyph it has in the top nav, so "this is a handover
+ * record" is legible before anyone reads the label. */
+const KIND_GLYPH: Record<ImportKind, typeof DeviceIcon> = {
+  device_list: DeviceIcon,
+  maintenance_list: WrenchIcon,
+  handover_minutes: HandoverIcon,
+};
+
 const PICKABLE: ImportKind[] = [
   "handover_minutes",
   "device_list",
   "maintenance_list",
 ];
+
+/** Phases a detection reports, and how far along each one is. `extract` is the only
+ * slow one — an OCR pass on a scan — so it owns most of the bar's travel. */
+const DETECT_PHASE: Record<"extract" | "matching" | "asking", { key: Key; at: number }> =
+  {
+    extract: { key: "iq.phase.extract", at: 30 },
+    matching: { key: "iq.phase.matching", at: 75 },
+    asking: { key: "iq.phase.asking", at: 88 },
+  };
 
 type QueueStatus = "waiting" | "detecting" | "ready" | "reviewing" | "done" | "error";
 
@@ -62,25 +95,41 @@ type Queued = {
   /** Text the server already extracted while detecting — reused by the reader. */
   sourceText?: string;
   status: QueueStatus;
-  /** What happened once it was applied, or why it failed. `issues` is a flag and
-   * not something read back out of `text`: the summary used to branch on
-   * `text.includes("cần xử lý")`, which quietly breaks the moment that sentence is
-   * translated. Text is for reading; flags are for deciding. */
-  outcome?: { text: string; issues?: boolean };
+  /** Where its detection has got to. Cleared once the file is classified. */
+  progress?: DetectProgress;
+  /** What happened once it was applied, or why it failed. `issues` and `skipped`
+   * are flags and not something read back out of `text`: the summary used to branch
+   * on `text.includes("cần xử lý")`, which quietly breaks the moment that sentence
+   * is translated. Text is for reading; flags are for deciding. */
+  outcome?: { text: string; issues?: boolean; skipped?: boolean };
 };
+
+/** "24 KB". Size is on the card because it is the one cue that tells a 40-row sheet
+ * from a scanned photo before anything has been read. */
+function fileSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
+  return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+}
+
+function extensionOf(name: string): string {
+  return (name.split(".").pop() ?? "").toUpperCase();
+}
 
 export function ImportModal({
   kind,
   onClose,
   onDone,
-  initialFile,
+  incoming,
 }: {
   /** "auto" = detect from the file. Anything else skips straight to that importer. */
   kind: ImportKind | "auto";
   onClose: () => void;
   onDone?: () => void;
-  /** A file already in hand — e.g. handed over from the Ask AI chat. */
-  initialFile?: File;
+  /** Files handed in from outside — dragged onto the window, or passed over from
+   * the Ask AI chat. `at` is the trigger rather than the array, so a second drop
+   * onto an already-open dialog appends instead of being mistaken for no change. */
+  incoming?: { files: File[]; at: number } | null;
 }) {
   const { t } = useT();
   const inputRef = useRef<HTMLInputElement>(null);
@@ -117,10 +166,24 @@ export function ImportModal({
   };
 
   useEffect(() => {
-    if (initialFile) add([initialFile]);
-    // The file identity is the trigger, not the recreated `add`.
+    if (incoming?.files.length) add(incoming.files);
+    // The batch's timestamp is the trigger; `add` is recreated every render, and
+    // the array is a fresh object each time even when nothing was dropped.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [initialFile]);
+  }, [incoming?.at]);
+
+  // Load the model now, while a human is still choosing files.
+  //
+  // Ollama drops the weights after ten idle minutes, and llama3.1:8b takes ~44s to
+  // come back — measured as time-to-first-token on a record that then generates in
+  // six. So the first import after a quiet morning spent three quarters of its wait
+  // on something that had nothing to do with the file. Overlapping it with the file
+  // picker hides nearly all of it. Fire-and-forget by design: it cannot fail the
+  // import, and an import that never needs the model (a spreadsheet on the company
+  // template, read in plain code) has simply wasted one tiny request.
+  useEffect(() => {
+    void warmLlm();
+  }, []);
 
   // Detect one file at a time. Firing them all at once at a model that answers in
   // seconds gets the whole batch queued behind each other anyway, and a row that
@@ -132,13 +195,15 @@ export function ImportModal({
 
     let cancelled = false;
     (async () => {
-      patch(next.id, { status: "detecting" });
+      patch(next.id, { status: "detecting", progress: undefined });
       try {
         const ext = next.file.name.split(".").pop()?.toLowerCase() ?? "";
         const source = SHEET_EXT.includes(ext)
           ? { sheet_text: await fileToSheetText(next.file) }
           : { attachment: await fileToAttachment(next.file) };
-        const result = await detectImportKind(source);
+        const result = await detectImportKindStreaming(source, (progress) => {
+          if (!cancelled) patch(next.id, { progress });
+        });
         if (cancelled) return;
         patch(next.id, {
           kind: result.kind === "unknown" ? null : (result.kind as ImportKind),
@@ -146,14 +211,15 @@ export function ImportModal({
           usedLlm: result.used_llm,
           sourceText: result.source_text,
           status: "ready",
+          progress: undefined,
         });
       } catch (e) {
         if (cancelled) return;
         patch(next.id, {
           status: "error",
+          progress: undefined,
           outcome: {
-            text:
-              e instanceof ApiError ? e.message : t("iq.err.detect"),
+            text: e instanceof ApiError ? e.message : t("iq.err.detect"),
           },
         });
       }
@@ -174,6 +240,22 @@ export function ImportModal({
     () => queue.find((f) => f.id === current) ?? null,
     [queue, current],
   );
+
+  // Cards rise in as they are added — but ONLY the new ones. Animating the whole
+  // list on every addition would fade the cards already on screen back from zero
+  // opacity, so dropping a sixth file made the first five blink.
+  const animated = useRef(new Set<string>());
+  useEffect(() => {
+    const fresh = queue.filter((f) => !animated.current.has(f.id));
+    if (!fresh.length) return;
+    fresh.forEach((f) => animated.current.add(f.id));
+    const nodes = fresh
+      .map((f) =>
+        document.querySelector<HTMLElement>(`[data-file-id="${f.id}"]`),
+      )
+      .filter((node): node is HTMLElement => !!node);
+    if (nodes.length) animateEntrance(nodes, 45);
+  }, [queue]);
 
   /** Move to the next file that still needs reviewing, or show the summary. */
   const advance = (afterId: string) => {
@@ -199,7 +281,12 @@ export function ImportModal({
   };
 
   const skipFile = (id: string) => {
-    patch(id, { status: "done", outcome: { text: t("iq.outcome.skipped") } });
+    patch(id, {
+      status: "done",
+      // Flagged, not inferred from the text: the summary counts what actually went
+      // in, and "4 files imported" must not include the one you closed unread.
+      outcome: { text: t("iq.outcome.skipped"), skipped: true },
+    });
     advance(id);
   };
 
@@ -277,17 +364,46 @@ export function ImportModal({
 
   if (finished) {
     const withIssues = applied.filter((f) => f.outcome?.issues);
+    const imported = applied.filter((f) => !f.outcome?.skipped);
+    const skipped = applied.length - imported.length;
     return (
-      <Modal title={t("iq.done.title")} onClose={onClose} width={620}>
+      <Modal title={t("iq.done.title")} onClose={onClose} width={640}>
         <div className="modal-form">
-          <div className="import-queue">
-            {queue.map((f) => (
-              <div className="import-queue-row" key={f.id}>
-                <span className="import-queue-icon is-done">
-                  <CheckIcon size={14} />
+          {/* One number leads, the files explain it. A bulk run's result is "four
+              records went in", not a list of twelve equal lines. */}
+          <div className="import-tally">
+            <span className="import-tally-n">{imported.length}</span>
+            <span className="import-tally-text">
+              <b>{t("iq.done.count", { n: imported.length })}</b>
+              {(withIssues.length > 0 || skipped > 0) && (
+                <span className="import-tally-sub">
+                  {[
+                    withIssues.length > 0 &&
+                      t("iq.done.someIssues", { n: withIssues.length }),
+                    skipped > 0 && t("iq.done.someSkipped", { n: skipped }),
+                  ]
+                    .filter(Boolean)
+                    .join(" · ")}
                 </span>
-                <span className="import-queue-name">{f.file.name}</span>
-                <span className="text-faint">{f.outcome?.text ?? "—"}</span>
+              )}
+            </span>
+          </div>
+          <div className="import-files">
+            {queue.map((f) => (
+              <div className="import-file is-done" key={f.id}>
+                <span
+                  className={`import-file-glyph${
+                    f.outcome?.skipped ? "" : " is-ok"
+                  }`}
+                >
+                  {f.outcome?.skipped ? <XIcon size={16} /> : <CheckIcon size={16} />}
+                </span>
+                <div className="import-file-body">
+                  <div className="import-file-top">
+                    <span className="import-file-name">{f.file.name}</span>
+                  </div>
+                  <div className="import-file-meta">{f.outcome?.text ?? "—"}</div>
+                </div>
               </div>
             ))}
           </div>
@@ -327,6 +443,10 @@ export function ImportModal({
           }}
         />
 
+        {/* The drop target. It has no `onDrop` of its own: the window-level handler
+            in lib/useFileDrop.ts catches every drop in the app, including the ones
+            landing here, so a second handler would add each file twice. What is
+            left is the highlight — the part that tells you this is a target. */}
         <div
           className={`import-zone${dragging ? " is-dragging" : ""}`}
           onDragOver={(e) => {
@@ -334,20 +454,24 @@ export function ImportModal({
             setDragging(true);
           }}
           onDragLeave={() => setDragging(false)}
-          onDrop={(e) => {
-            e.preventDefault();
-            setDragging(false);
-            const picked = Array.from(e.dataTransfer.files ?? []);
-            if (picked.length) add(picked);
-          }}
+          onDrop={() => setDragging(false)}
         >
           <button type="button" onClick={() => inputRef.current?.click()}>
-            <UploadIcon size={26} />
+            <span className="import-zone-glyph">
+              <UploadIcon size={26} />
+            </span>
             <b>{t("iq.drop")}</b>
             <span className="import-hint">
               {kind === "auto"
                 ? t("iq.drop.auto")
                 : t("iq.drop.fixed", { kind: t(KIND_LABEL[kind]) })}
+            </span>
+            <span className="import-zone-formats">
+              {["XLSX", "CSV", "PDF", t("iq.format.image")].map((f) => (
+                <span className="import-format" key={f}>
+                  {f}
+                </span>
+              ))}
             </span>
           </button>
         </div>
@@ -355,78 +479,25 @@ export function ImportModal({
         {error && <Alert type="warning" showIcon message={error} />}
 
         {queue.length > 0 && (
-          <div className="import-queue">
+          <div className="import-files">
             {queue.map((f) => (
-              <div className="import-queue-row" key={f.id}>
-                <span
-                  className={`import-queue-icon${
-                    f.status === "error" ? " is-error" : ""
-                  }`}
-                >
-                  {f.status === "detecting" ? (
-                    <Spin size="small" />
-                  ) : f.status === "error" ? (
-                    <XIcon size={14} />
-                  ) : f.status === "done" ? (
-                    <CheckIcon size={14} />
-                  ) : (
-                    <UploadIcon size={14} />
-                  )}
-                </span>
-                <span className="import-queue-name">{f.file.name}</span>
-
-                {f.status === "detecting" && (
-                  <span className="text-faint">{t("iq.status.detecting")}</span>
-                )}
-                {f.status === "waiting" && (
-                  <span className="text-faint">{t("iq.status.waiting")}</span>
-                )}
-                {f.status === "error" && (
-                  <span className="text-faint">{f.outcome?.text}</span>
-                )}
-                {f.status === "done" && (
-                  <span className="text-faint">{f.outcome?.text}</span>
-                )}
-
-                {(f.status === "ready" || f.status === "error") && (
-                  <>
-                    <Segmented
-                      size="small"
-                      value={f.kind ?? undefined}
-                      onChange={(v) =>
-                        patch(f.id, {
-                          kind: v as ImportKind,
-                          status: "ready",
-                          reason: t("iq.kindByYou"),
-                          outcome: undefined,
-                        })
-                      }
-                      options={PICKABLE.map((k) => ({
-                        value: k,
-                        label: t(KIND_LABEL[k]),
-                      }))}
-                    />
-                    {f.usedLlm && <Tag color="purple">AI</Tag>}
-                  </>
-                )}
-
-                <Button
-                  size="small"
-                  type="text"
-                  aria-label={t("iq.remove", { name: f.file.name })}
-                  onClick={() => setQueue((q) => q.filter((x) => x.id !== f.id))}
-                >
-                  <XIcon size={14} />
-                </Button>
-              </div>
+              <FileCard
+                key={f.id}
+                file={f}
+                onKind={(k) =>
+                  patch(f.id, {
+                    kind: k,
+                    status: "ready",
+                    reason: t("iq.kindByYou"),
+                    outcome: undefined,
+                  })
+                }
+                onRemove={() => setQueue((q) => q.filter((x) => x.id !== f.id))}
+              />
             ))}
           </div>
         )}
 
-        {/* Why it decided what it decided — one line, not one Alert per file. */}
-        {reviewable.length === 1 && reviewable[0].reason && (
-          <span className="import-hint">{reviewable[0].reason}</span>
-        )}
         {unknown.length > 0 && (
           <Alert
             type="warning"
@@ -452,5 +523,141 @@ export function ImportModal({
         </div>
       </div>
     </Modal>
+  );
+}
+
+/** One queued file, as a card: what it is, why we think so, how far along, and the
+ * one click that overrules us. */
+function FileCard({
+  file,
+  onKind,
+  onRemove,
+}: {
+  file: Queued;
+  onKind: (kind: ImportKind) => void;
+  onRemove: () => void;
+}) {
+  const { t } = useT();
+  const Glyph = file.kind ? KIND_GLYPH[file.kind] : UploadIcon;
+  const settled = file.status === "ready" || file.status === "error";
+  const phase =
+    file.progress &&
+    file.progress.phase !== "done" &&
+    file.progress.phase !== "error"
+      ? file.progress
+      : null;
+
+  return (
+    <div
+      // Read by the entrance animation, which only animates cards it has not seen.
+      data-file-id={file.id}
+      className={`import-file${file.status === "error" ? " is-error" : ""}${
+        file.status === "done" ? " is-done" : ""
+      }`}
+    >
+      <span
+        className={`import-file-glyph${
+          file.status === "error"
+            ? " is-bad"
+            : file.status === "done"
+              ? " is-ok"
+              : file.kind
+                ? " is-known"
+                : ""
+        }`}
+      >
+        {file.status === "error" ? (
+          <XIcon size={16} />
+        ) : file.status === "done" ? (
+          <CheckIcon size={16} />
+        ) : (
+          <Glyph size={16} />
+        )}
+      </span>
+
+      <div className="import-file-body">
+        <div className="import-file-top">
+          <span className="import-file-name">{file.file.name}</span>
+          {file.usedLlm && (
+            <Tooltip title={t("iq.byAi")}>
+              <Tag color="purple" bordered={false}>
+                <SparklesIcon size={11} /> AI
+              </Tag>
+            </Tooltip>
+          )}
+        </div>
+
+        <div className="import-file-meta">
+          <span>{extensionOf(file.file.name)}</span>
+          <span>·</span>
+          <span>{fileSize(file.file.size)}</span>
+          {/* Why we think it is what it think it is — the whole reason detection is
+              allowed to be confident. */}
+          {settled && file.reason && (
+            <>
+              <span>·</span>
+              <span className="import-file-why">{file.reason}</span>
+            </>
+          )}
+          {file.status === "waiting" && (
+            <>
+              <span>·</span>
+              <span>{t("iq.status.waiting")}</span>
+            </>
+          )}
+          {file.status === "done" && file.outcome && (
+            <>
+              <span>·</span>
+              <span>{file.outcome.text}</span>
+            </>
+          )}
+        </div>
+
+        {/* Shown for the whole of `detecting`, not just once the server has spoken.
+            The first stretch is the browser's own work — flattening a workbook or
+            base64-ing a PDF — and on a large file that is a visible pause with no
+            event to announce it. */}
+        {file.status === "detecting" && (
+          <div className="import-file-progress">
+            <Progress
+              percent={phase ? DETECT_PHASE[phase.phase].at : 8}
+              showInfo={false}
+              size="small"
+              status="active"
+              strokeColor="var(--accent)"
+            />
+            <span className="import-file-phase">
+              {t(phase ? DETECT_PHASE[phase.phase].key : "iq.phase.opening")}
+            </span>
+          </div>
+        )}
+
+        {settled && (
+          <div className="import-file-pick">
+            <Segmented
+              size="small"
+              value={file.kind ?? undefined}
+              onChange={(v) => onKind(v as ImportKind)}
+              options={PICKABLE.map((k) => ({
+                value: k,
+                label: t(KIND_LABEL[k]),
+              }))}
+            />
+          </div>
+        )}
+      </div>
+
+      {file.status !== "done" && (
+        <Button
+          size="small"
+          type="text"
+          className="import-file-x"
+          aria-label={t("iq.remove", { name: file.file.name })}
+          onClick={onRemove}
+        >
+          <XIcon size={14} />
+        </Button>
+      )}
+    </div>
   );
 }

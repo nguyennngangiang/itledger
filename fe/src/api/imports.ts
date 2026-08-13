@@ -3,15 +3,28 @@
 //   plan  → fields → what would change, plus each line's inferred direction
 //   apply → the decisions the user confirmed → one transaction
 // Plus the import-issue log that backs the Notifications screen.
-import { request } from './client'
+import { ApiError, request, streamRequest } from './client'
 import type { Attachment } from './assistant'
 import type { Device, DeviceStatus, User } from '../types'
 
-// Which way a line item moves. Decided by the backend from the ledger's own
-// history, never by the LLM — see be/handover_import.decide_flow.
+// Which way a movement goes. Decided by the backend from ranked evidence — the
+// ledger's own history, then the Ghi chú arrow — never by the LLM. See
+// be/handover_direction.py.
 export type Flow = 'return' | 'issue' | 'transfer'
 
+// Where a direction came from, so a row can say why it points where it does.
+export type DirectionSource =
+  | 'recorded'
+  | 'note'
+  | 'transfer'
+  | 'holder'
+  | 'owner'
+  | 'it'
+  | 'unknown'
+
 export type MinutesParty = {
+  /** The form's own letter: "A", "B", "C" … */
+  label: string
   name: string | null
   code: string | null
   dept: string | null
@@ -19,6 +32,9 @@ export type MinutesParty = {
 }
 
 export type MinutesItem = {
+  /** The movement's identity — its position. NOT the serial: one record can move
+   * the same device twice, and keying on the serial merges the two into one. */
+  row: number
   no: number | null
   item: string | null
   quantity: number | null
@@ -28,11 +44,11 @@ export type MinutesItem = {
   device: Partial<Record<'type' | 'brand' | 'cpu' | 'ram' | 'storage' | 'name', string | null>>
 }
 
+// A record is N parties and M movements, not a pair and a list.
 export type ParsedMinutes = {
   handover_date: string | null
   place: string | null
-  party_a: MinutesParty
-  party_b: MinutesParty
+  parties: MinutesParty[]
   items: MinutesItem[]
 }
 
@@ -40,7 +56,25 @@ export type ReadResult = {
   parsed: ParsedMinutes
   warnings: string[]
   source_text: string
+  /** Who read it: `sheet` = the form parsed in plain code, `llm` = the model. */
+  reader: 'sheet' | 'llm'
+  /** Numbered rows the file's own item table has — the progress denominator. */
+  item_rows: number
 }
+
+/** One step of a read in flight. See be/routers/imports.py `_read_events`.
+ *
+ * `loading` is the phase worth naming out loud: it is the model server pulling
+ * llama3.1:8b into VRAM, which takes ~44s and produces no output at all, so a bare
+ * spinner there is indistinguishable from a hang. */
+export type ReadProgress =
+  | { phase: 'extract'; name: string }
+  | { phase: 'scanning'; total: number }
+  | { phase: 'loading'; total: number }
+  | { phase: 'reading'; items: number; total: number }
+  | { phase: 'verifying'; total: number }
+  | { phase: 'done'; result: ReadResult }
+  | { phase: 'error'; status: number; detail: string }
 
 export type IssueKind =
   | 'user_created'
@@ -59,10 +93,13 @@ export type PlanIssue = {
   item_id: string | null
   payload: {
     label?: string
+    /** Which movement raised it — two rows can name one serial. */
+    row?: number
     code?: string
     name?: string
     serial?: string
     reason?: string
+    source?: DirectionSource
     guess?: Flow
     missing?: string[]
     team_suggestion?: string | null
@@ -95,12 +132,15 @@ export type UserPlan = {
 }
 
 export type ItemPlan = {
+  row: number
   no: number | null
   serial: string
   note: string | null
   detail: string | null
   flow: Flow
   flow_reason: string
+  direction_source: DirectionSource
+  confident: boolean
   ambiguous: boolean
   duplicate_of: Record<string, unknown> | null
   from_user_id: string | null
@@ -119,11 +159,11 @@ export type HandoverPlan = {
   source_file: string | null
   handover_date: string | null
   place: string | null
-  it_side: 'a' | 'b' | null
+  /** Index into `parties`, or null when no party is clearly the IT side. */
+  it_index: number | null
   it_reason: string
   it_code: string | null
-  user_code: string | null
-  users: UserPlan[]
+  parties: UserPlan[]
   items: ItemPlan[]
   issue_count: number
 }
@@ -166,6 +206,19 @@ export type DetectResult = {
   source_text: string
 }
 
+/** One step of a detection in flight. See be/routers/imports.py `_detect_events`.
+ *
+ * `extract` is the phase that needed reporting: for a PDF or a photo it is an OCR
+ * pass that runs for tens of seconds, and it happens during DETECTION rather than
+ * during the read (the extracted text is handed on, so a scan is never OCR'd
+ * twice). A queue row spinning silently through it was the last unexplained wait. */
+export type DetectProgress =
+  | { phase: 'extract'; name: string }
+  | { phase: 'matching' }
+  | { phase: 'asking' }
+  | { phase: 'done'; result: DetectResult }
+  | { phase: 'error'; status: number; detail: string }
+
 // Classify a dropped file. Keyword/header heuristics answer first and cost
 // nothing; the LLM is only consulted when they are unsure (be/import_detect.py).
 export function detectImportKind(source: { sheet_text?: string; attachment?: Attachment }) {
@@ -175,23 +228,81 @@ export function detectImportKind(source: { sheet_text?: string; attachment?: Att
   })
 }
 
+/** The same detection, reporting each step to `onProgress`. */
+export async function detectImportKindStreaming(
+  source: { sheet_text?: string; attachment?: Attachment },
+  onProgress: (progress: DetectProgress) => void,
+): Promise<DetectResult> {
+  const events = streamRequest<DetectProgress>('/imports/detect/stream', {
+    body: JSON.stringify(source),
+  })
+  for await (const event of events) {
+    onProgress(event)
+    if (event.phase === 'done') return event.result
+    if (event.phase === 'error') throw new ApiError(event.status, event.detail)
+  }
+  throw new ApiError(422, 'Detection ended without a result.')
+}
+
 // A spreadsheet is flattened in the browser and sent as text; a PDF or photo has
 // to go up as bytes so the server can extract (and OCR) it.
-export function readHandoverMinutes(source: { sheet_text?: string; attachment?: Attachment }) {
+//
+// `reader: 'llm'` skips the plain-code form parser and asks the model — what the
+// "read with AI instead" retry sends when a parse came back looking wrong.
+export type ReadSource = {
+  sheet_text?: string
+  attachment?: Attachment
+  reader?: 'auto' | 'llm'
+}
+
+export function readHandoverMinutes(source: ReadSource) {
   return request<ReadResult>('/imports/handover/read', {
     method: 'POST',
     body: JSON.stringify(source),
   })
 }
 
+/** The same read, reporting each step to `onProgress` as it happens.
+ *
+ * Resolves with the finished reading. Throws `ApiError` for a request that never
+ * opened and a plain `Error` carrying the server's message for one that failed
+ * mid-stream — by then the status code is spent, so the failure arrives as an
+ * event (see `streamRequest`). */
+export async function readHandoverMinutesStreaming(
+  source: ReadSource,
+  onProgress: (progress: ReadProgress) => void,
+): Promise<ReadResult> {
+  const events = streamRequest<ReadProgress>('/imports/handover/read/stream', {
+    body: JSON.stringify(source),
+  })
+  for await (const event of events) {
+    onProgress(event)
+    if (event.phase === 'done') return event.result
+    if (event.phase === 'error') throw new ApiError(event.status, event.detail)
+  }
+  throw new ApiError(503, 'The read ended without a result.')
+}
+
+/** Ask the model server to load the model now, before anyone needs it.
+ *
+ * Ollama unloads after ten idle minutes and llama3.1:8b takes ~44s to load, which
+ * the first import of the day used to pay in full mid-read. Called when the import
+ * dialog opens so the load overlaps choosing a file. Deliberately swallows its own
+ * failure: a cold model is a slow import, not a broken one. */
+export function warmLlm() {
+  return request<{ warm: boolean }>('/imports/llm/warm', { method: 'POST' }).catch(
+    () => ({ warm: false }),
+  )
+}
+
 export function planHandoverImport(
   parsed: ParsedMinutes,
   sourceFile?: string | null,
-  itSide?: 'a' | 'b' | null,
+  itIndex?: number | null,
 ) {
   return request<HandoverPlan>('/imports/handover/plan', {
     method: 'POST',
-    body: JSON.stringify({ parsed, source_file: sourceFile, it_side: itSide }),
+    body: JSON.stringify({ parsed, source_file: sourceFile, it_index: itIndex }),
   })
 }
 
@@ -202,9 +313,15 @@ export type UserDecision = {
   team?: string | null
 }
 
+// `from_user_id` / `to_user_id` are the authoritative pair — the only thing that
+// can describe a record with three parties, where naming "the flow" no longer says
+// who is at each end. The server re-derives the flow from them.
 export type ItemDecision = {
+  row: number
   serial: string
   flow: Flow | 'skip'
+  from_user_id?: string | null
+  to_user_id?: string | null
   handover_id?: string
   handover_date?: string | null
   reason?: string | null
@@ -215,9 +332,8 @@ export type ItemDecision = {
 export function applyHandoverImport(body: {
   source_file?: string | null
   handover_date?: string | null
-  party_a_code?: string | null
-  party_b_code?: string | null
-  it_side?: 'a' | 'b' | null
+  party_codes: (string | null)[]
+  it_code?: string | null
   users: UserDecision[]
   items: ItemDecision[]
   issues: PlanIssue[]
