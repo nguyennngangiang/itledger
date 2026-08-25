@@ -98,12 +98,25 @@ if ($caddyProc) {
         -RedirectStandardOutput (Join-Path $PSScriptRoot 'caddy.out.log') `
         -RedirectStandardError  (Join-Path $PSScriptRoot 'caddy.err.log') `
         -WindowStyle Hidden
-    Write-Log "started caddy (:10000)"
+    Write-Log "launched caddy (:10000)"
+    # Long enough to bind or to fail. Without the wait the status line below reports
+    # on a process that has not decided yet.
+    Start-Sleep -Seconds 3
 }
 
 # 4) Report what is actually reachable, so the log alone explains a bad boot.
+#    Caddy is reported twice on purpose. The port alone answers "is something
+#    serving :10000", which is not the same question as "is OUR caddy serving it" —
+#    a second process holding the port makes ours exit on a bind error while the
+#    port check still says `up`. Two fields make that visible instead of silent.
+$ourCaddy = Get-CimInstance Win32_Process -Filter "Name='caddy.exe'" -ErrorAction SilentlyContinue |
+    Where-Object { $_.CommandLine -like "*$caddyCfg*" }
 $status = @(
+    "caddy.proc=$(if ($ourCaddy) {'up'} else {'DOWN'})"
     "caddy:10000=$(if (Test-Listening 10000) {'up'} else {'DOWN'})"
     "api:8000=$(if (Test-Listening 8000) {'up'} else {'DOWN'})"
 ) -join '  '
 Write-Log "status  $status"
+if (-not $ourCaddy -and (Test-Listening 10000)) {
+    Write-Log "WARNING: :10000 is held by a caddy that is not ours - check deploy\caddy.err.log"
+}
