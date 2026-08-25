@@ -1,34 +1,37 @@
 <#
     start-itledger.ps1 — brings up the whole LAN deployment. Idempotent: safe to
     run any number of times, which is what lets the ITLedger-AutoStart task use it
-    both as the AtStartup action and as a 5-minute watchdog.
+    both as the AtLogon action and as a 5-minute watchdog.
 
     Pieces, and where each one lives:
-      * Postgres + the FastAPI API   containers, Docker Engine inside the WSL2
-                                     distro Ubuntu-24.04 (/mnt/d/itledger/be)
-      * the e5-small embedder        native Windows process on :8010 (needs no
-                                     container; ai/main.py picks CPU here)
-      * Caddy on :10000              NOT ours — the caddy.exe that D:\LLM runs for
-                                     the LLM stack also serves this app, via an
-                                     import line in D:\LLM\caddy\Caddyfile
+      * WSL keepalive               a `sleep infinity` inside Ubuntu-24.04, held
+                                    open so the distro (and its docker daemon)
+                                    does not shut down
+      * Postgres + the FastAPI API  containers, Docker Engine inside that same
+                                    distro (/mnt/d/itledger/be)
+      * Caddy on :10000             deploy\caddy.exe with deploy\Caddyfile
 
     Two things worth knowing before editing:
       1. A WSL2 distro shuts down — killing dockerd and every container with it —
-         as soon as no process is running inside it. D:\LLM\start-llm.ps1 owns the
-         `sleep infinity` keepalive that prevents that, so we call it rather than
-         start a competing one.
-      2. Caddy is shared. Delegating to start-llm.ps1 also means we don't have to
-         duplicate its LLM_API_KEY loading: the :8443 block interpolates
-         {$LLM_API_KEY}, and starting caddy without that variable set turns its
-         Bearer matcher into a comparison against "Bearer ", which 401s every LLM
-         request.
+         as soon as no process is running inside it. Step 1 below owns the
+         keepalive that prevents that.
+      2. This used to delegate steps 1 and 3 to D:\LLM\start-llm.ps1, because that
+         stack's caddy.exe served :10000 for us via an import line and its
+         keepalive held the distro up. The LLM stack is retired; nothing here
+         touches D:\LLM any more, and neither the keepalive nor Caddy is shared.
+
+    The e5-small embedder on :8010 is also gone. It only ever served
+    /devices/semantic-search and its two siblings, which nothing but Ask AI
+    called — and Ask AI was removed with the LLM stack. ai\run-host.ps1 is still
+    in the repo if that changes.
 #>
 $ErrorActionPreference = 'SilentlyContinue'
 
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $log      = Join-Path $PSScriptRoot 'autostart.log'
 $distro   = 'Ubuntu-24.04'
-$aiPort   = 8010
+$caddyExe = Join-Path $PSScriptRoot 'caddy.exe'
+$caddyCfg = Join-Path $PSScriptRoot 'Caddyfile'
 
 function Write-Log([string]$msg) {
     Add-Content -Path $log -Value "$((Get-Date).ToString('s'))  $msg"
@@ -40,16 +43,17 @@ function Test-Listening([int]$port) {
 
 Write-Log "--- start-itledger run (user=$env:USERNAME) ---"
 
-# 1) Shared foundation: WSL keepalive + LLM containers + the caddy that serves us.
-#    At boot LxssManager is often not ready the instant an AtStartup task fires, so
-#    retry until the distro's docker daemon actually answers.
-$llmStart = 'D:\LLM\start-llm.ps1'
+# 1) WSL keepalive + wait for the distro's docker daemon.
+#    At boot LxssManager is often not ready the instant the task fires, so retry
+#    until docker actually answers rather than assuming one launch was enough.
 $dockerVersion = $null
 for ($i = 1; $i -le 10; $i++) {
-    if (Test-Path $llmStart) {
-        & $llmStart    # idempotent by design; its own guards skip work already done
-    } elseif ($i -eq 1) {
-        Write-Log "WARNING: $llmStart is missing - the WSL keepalive and Caddy (:10000) will NOT start"
+    $alive = Get-CimInstance Win32_Process -Filter "Name='wsl.exe'" -ErrorAction SilentlyContinue |
+             Where-Object { $_.CommandLine -like '*sleep infinity*' }
+    if (-not $alive) {
+        Start-Process wsl.exe -ArgumentList "-d $distro -u root -- sleep infinity" -WindowStyle Hidden
+        Write-Log "started WSL keepalive"
+        Start-Sleep -Seconds 4
     }
 
     $dockerVersion = wsl.exe -d $distro -u root -- bash -lc 'docker info --format "{{.ServerVersion}}" 2>/dev/null'
@@ -76,35 +80,30 @@ if ($LASTEXITCODE -eq 0) {
     Write-Log "compose up -d FAILED (exit $LASTEXITCODE): $($composeOut -join ' | ')"
 }
 
-# 3) Embedder. Guard on the port AND on an existing ai.main:app process. The port
-#    alone is not enough: the service spends its first seconds compiling the 448MB
-#    ONNX graph before it binds, so a tick landing inside that window would start a
-#    second copy. Matching on the command line (not just Name='python.exe', which
-#    other things on this host also use) closes that gap.
-#    Note one embedder shows up as TWO processes: .venv\Scripts\python.exe is a
-#    launcher stub that re-execs the real interpreter. That's normal, not a duplicate.
-$embedderProc = Get-CimInstance Win32_Process -Filter "Name='python.exe'" -ErrorAction SilentlyContinue |
-    Where-Object { $_.CommandLine -like '*ai.main:app*' }
+# 3) Caddy :10000 — the SPA plus the /api proxy that puts the loopback-published
+#    API container on the office LAN.
+#    Matched on the command line, not `Get-Process caddy`: a caddy.exe belonging to
+#    something else (the LLM stack used to be exactly that) would otherwise look
+#    like ours and this would skip starting the one that serves :10000.
+$caddyProc = Get-CimInstance Win32_Process -Filter "Name='caddy.exe'" -ErrorAction SilentlyContinue |
+    Where-Object { $_.CommandLine -like "*$caddyCfg*" }
 
-if (Test-Listening $aiPort) {
-    Write-Log "embedder already listening on :$aiPort"
-} elseif ($embedderProc) {
-    Write-Log "embedder starting up (pid $($embedderProc.ProcessId -join ',')) - not bound yet, leaving it alone"
+if ($caddyProc) {
+    Write-Log "caddy already running (pid $($caddyProc.ProcessId -join ','))"
+} elseif (-not (Test-Path $caddyExe)) {
+    Write-Log "ERROR: $caddyExe is missing - :10000 will NOT come up"
 } else {
-    $runHost = Join-Path $repoRoot 'ai\run-host.ps1'
-    Start-Process -FilePath 'powershell.exe' `
-        -ArgumentList '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', "`"$runHost`"" `
-        -WindowStyle Hidden `
-        -RedirectStandardOutput (Join-Path $PSScriptRoot 'embedder.out.log') `
-        -RedirectStandardError  (Join-Path $PSScriptRoot 'embedder.err.log')
-    Write-Log "started embedder (:$aiPort)"
+    Start-Process -FilePath $caddyExe `
+        -ArgumentList "run --config `"$caddyCfg`"" `
+        -RedirectStandardOutput (Join-Path $PSScriptRoot 'caddy.out.log') `
+        -RedirectStandardError  (Join-Path $PSScriptRoot 'caddy.err.log') `
+        -WindowStyle Hidden
+    Write-Log "started caddy (:10000)"
 }
 
 # 4) Report what is actually reachable, so the log alone explains a bad boot.
 $status = @(
     "caddy:10000=$(if (Test-Listening 10000) {'up'} else {'DOWN'})"
-    "llm-caddy:8443=$(if (Test-Listening 8443) {'up'} else {'DOWN'})"
     "api:8000=$(if (Test-Listening 8000) {'up'} else {'DOWN'})"
-    "embedder:$aiPort=$(if (Test-Listening $aiPort) {'up'} else {'starting'})"
 ) -join '  '
 Write-Log "status  $status"

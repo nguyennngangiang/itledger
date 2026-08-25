@@ -1,0 +1,20 @@
+# IT Ledger — the whole Caddy config, for the caddy.exe this repo now runs itself.
+#
+# Until the LLM stack at D:\LLM was retired, there was no file here: the :10000
+# site block lived in Caddyfile.site and was pulled into THAT stack's Caddyfile by
+# an import line, so one caddy.exe served both. Retiring the stack took its
+# Caddyfile with it, hence this one — the site block is unchanged, it just has a
+# config of its own to sit in.
+#
+# Started by deploy/start-itledger.ps1 from deploy/caddy.exe (a copy, so nothing
+# under D:\LLM has to exist).
+
+{
+	# No admin API: this listens on the office LAN, and nothing here reloads
+	# config over HTTP. The cost is that `caddy reload` does not work — applying a
+	# change to either file means stopping the process and letting the watchdog
+	# (or start-itledger.ps1) start it again.
+	admin off
+}
+
+import "D:/itledger/deploy/Caddyfile.site"

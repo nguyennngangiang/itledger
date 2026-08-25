@@ -12,8 +12,9 @@
 
     B) Fallback, no admin needed:
            powershell -ExecutionPolicy Bypass -File deploy\register-task.ps1 -LogonOnly
-       Triggers at logon instead — same as the neighbouring LLM-AutoStart task.
-       The stack comes up once someone logs into the IT account, NOT at boot.
+       Triggers at logon instead. The stack comes up once someone logs into the
+       IT account, NOT at boot. This is the mode registered today, inherited from
+       the retired LLM-AutoStart task that used to bring this app up.
 
     -TaskUser defaults to the account that owns the WSL distro, and you almost
     certainly should not change it. See the comment on the parameter.
@@ -85,7 +86,7 @@ $common = @{
     TaskName    = $taskName
     Action      = $action
     Settings    = $settings
-    Description = 'IT Ledger: WSL/docker stack + e5-small embedder + Caddy :10000 (LAN deployment)'
+    Description = 'IT Ledger: WSL keepalive + docker stack + Caddy :10000 (LAN deployment)'
 }
 
 if ($LogonOnly) {

@@ -32,3 +32,8 @@ ai/.models/
 # runtime logs written by the autostart task, Caddy and the embedder.
 .python312/
 deploy/*.log
+
+# Vendored Caddy binary (53 MB). Copied from D:\LLM\caddy\caddy.exe when the app
+# was split off that stack — see deploy/README.md. Not tracked; deploy/Caddyfile
+# and start-itledger.ps1 are what matter.
+deploy/caddy.exe

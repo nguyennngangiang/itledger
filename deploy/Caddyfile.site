@@ -1,16 +1,15 @@
 # IT Ledger — LAN site block.
 #
-# NOT loaded on its own. It is pulled into the Caddy instance that already runs
-# on this host for the LLM stack, via one line appended to D:\LLM\caddy\Caddyfile:
+# NOT loaded on its own: deploy/Caddyfile is the config, and it imports this file.
+# The split is historical — this block used to be imported into the LLM stack's
+# Caddyfile at D:\LLM so that one caddy.exe served both :8443 and :10000. That
+# stack is retired and this app runs its own caddy.exe now, but keeping the site
+# block in its own file costs nothing and the two have different reasons to change.
 #
-#     import "D:/itledger/deploy/Caddyfile.site"
+# Forward slashes throughout — Caddy accepts them on Windows and they avoid
+# backslash escaping in the tokenizer.
 #
-# One caddy.exe therefore serves two sites: :8443 (LLM, Bearer-authenticated) and
-# :10000 (this app). The Bearer matcher lives inside the :8443 block, so nothing
-# here inherits it. Forward slashes throughout — Caddy accepts them on Windows and
-# they avoid backslash escaping in the tokenizer.
-#
-# That Caddyfile sets `admin off` globally, so `caddy reload` does NOT work:
+# deploy/Caddyfile sets `admin off` globally, so `caddy reload` does NOT work:
 # applying a change here means stopping and restarting the caddy process.
 
 :10000 {
@@ -33,8 +32,10 @@
 	handle_path /api/* {
 		reverse_proxy 127.0.0.1:8000 {
 			transport http {
-				# Ask AI waits on llama3.1:8b, which can be slow to first token.
-				read_timeout 300s
+				# Reading a handover record is the longest call the API makes, and
+				# it is plain-code parsing now rather than a model — seconds, not
+				# the minutes the retired LLM path needed.
+				read_timeout 120s
 			}
 		}
 	}
