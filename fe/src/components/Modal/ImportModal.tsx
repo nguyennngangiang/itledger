@@ -25,7 +25,7 @@
 // there is what made this screen read as a progress-less list of filenames.
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Alert, Button, Progress, Segmented, Tag, Tooltip } from "antd";
-import { detectImportKindStreaming, warmLlm } from "../../api/imports";
+import { detectImportKindStreaming } from "../../api/imports";
 import type { DetectProgress } from "../../api/imports";
 import { ApiError } from "../../api/client";
 import { fileToAttachment } from "../../lib/files";
@@ -171,19 +171,6 @@ export function ImportModal({
     // the array is a fresh object each time even when nothing was dropped.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [incoming?.at]);
-
-  // Load the model now, while a human is still choosing files.
-  //
-  // Ollama drops the weights after ten idle minutes, and llama3.1:8b takes ~44s to
-  // come back — measured as time-to-first-token on a record that then generates in
-  // six. So the first import after a quiet morning spent three quarters of its wait
-  // on something that had nothing to do with the file. Overlapping it with the file
-  // picker hides nearly all of it. Fire-and-forget by design: it cannot fail the
-  // import, and an import that never needs the model (a spreadsheet on the company
-  // template, read in plain code) has simply wasted one tiny request.
-  useEffect(() => {
-    void warmLlm();
-  }, []);
 
   // Detect one file at a time. Firing them all at once at a model that answers in
   // seconds gets the whole batch queued behind each other anyway, and a row that

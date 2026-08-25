@@ -35,7 +35,6 @@ import type {
   PlanIssue,
   ReadProgress,
   ReadResult,
-  ReadSource,
   UserDecision,
   UserPlan,
 } from "../../api/imports";
@@ -134,9 +133,6 @@ export function ImportHandoverModal({
   const [progress, setProgress] = useState<ReadProgress | null>(null);
   // Which reader answered — the plain-code form parser or the model.
   const [reader, setReader] = useState<ReadResult["reader"] | null>(null);
-  // Kept so the read can be repeated with the model when a parse looks wrong. The
-  // picker's File is otherwise gone by the time anyone notices.
-  const pickedRef = useRef<{ file: File; text?: string } | null>(null);
 
   // Decisions layered over the plan.
   const [flowOverride, setFlowOverride] = useState<Record<string, Flow | "skip">>({});
@@ -172,16 +168,11 @@ export function ImportHandoverModal({
     [plan],
   );
 
-  const pick = async (
-    picked: File,
-    text?: string,
-    which: ReadSource["reader"] = "auto",
-  ) => {
+  const pick = async (picked: File, text?: string) => {
     setError(null);
     setFileName(picked.name);
     setBusy(t("hi.busy.read"));
     setProgress(null);
-    pickedRef.current = { file: picked, text };
     try {
       // Already extracted upstream? Send the text and skip the extract entirely.
       const ext = picked.name.split(".").pop()?.toLowerCase() ?? "";
@@ -190,10 +181,7 @@ export function ImportHandoverModal({
         : SHEET_EXT.includes(ext)
           ? { sheet_text: await fileToSheetText(picked) }
           : { attachment: await fileToAttachment(picked) };
-      const result = await readHandoverMinutesStreaming(
-        { ...source, reader: which },
-        setProgress,
-      );
+      const result = await readHandoverMinutesStreaming(source, setProgress);
       setParsed(result.parsed);
       setWarnings(result.warnings);
       setReader(result.reader);
@@ -204,15 +192,6 @@ export function ImportHandoverModal({
       setBusy(null);
       setProgress(null);
     }
-  };
-
-  /** Read the same file again, with the model this time. The form parser is exact
-   * on the company template and declines anything it cannot read whole, but a
-   * template that changed could still parse into something subtly wrong — so the
-   * way out is one button, not a bug report. */
-  const rereadWithAi = () => {
-    const last = pickedRef.current;
-    if (last) pick(last.file, last.text, "llm");
   };
 
   useEffect(() => {
@@ -796,11 +775,6 @@ export function ImportHandoverModal({
             <Button onClick={() => (embedded ? onClose() : setStep("pick"))}>
               {t(embedded ? "hi.action.dropFile" : "hi.action.otherFile")}
             </Button>
-            {reader === "sheet" && (
-              <Button onClick={rereadWithAi} disabled={!!busy}>
-                {t("hi.action.rereadAi")}
-              </Button>
-            )}
             <Button
               type="primary"
               onClick={reconcile}

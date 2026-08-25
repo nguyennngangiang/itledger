@@ -11,6 +11,7 @@ from datetime import date
 import pytest
 
 from be import handover_direction, handover_import, handover_sheet, llm
+from be.config import settings
 from be.handover_direction import Context, Movement, Party, decide, parse_note_direction
 from be.handover_import import ISSUE, RETURN, TRANSFER
 from be.repositories import device as device_repo
@@ -123,6 +124,17 @@ PAIR = (
 )
 
 
+def _ai_on(monkeypatch):
+    """Switch the model paths back on for one test.
+
+    `settings.ai_enabled` is FALSE in the deployed configuration — the model server
+    was retired — and every LLM call site is guarded by it. A test about what those
+    call sites do when a model IS available has to say so, or it passes without ever
+    running the code it is named after.
+    """
+    monkeypatch.setattr(settings, "ai_enabled", True)
+
+
 def _fake_llm(monkeypatch, reading: dict):
     """Make the LLM answer with a canned reading — no model is contacted.
 
@@ -131,7 +143,11 @@ def _fake_llm(monkeypatch, reading: dict):
     deliberately splits the JSON mid-string rather than yielding it whole — that is
     the shape the real one arrives in, and it is what the progress counter has to
     survive (`"serial"` routinely straddles two chunks).
+
+    Implies `_ai_on` — a canned reading is worthless if the guard skips the call.
     """
+    _ai_on(monkeypatch)
+
     async def _chat(system, user, **kwargs):
         return json.dumps(reading)
 
@@ -168,6 +184,8 @@ MAINTENANCE_SHEET = """\
 # ------------------------------------------------------------------ /detect
 
 async def test_detect_handover_without_asking_the_llm(client, monkeypatch):
+    _ai_on(monkeypatch)  # a model IS available here; the point is that it is not asked
+
     async def _boom(*a, **k):  # noqa: ANN002
         raise AssertionError("heuristics should have settled this")
     monkeypatch.setattr(llm, "_chat", _boom)
@@ -182,6 +200,8 @@ async def test_detect_handover_without_asking_the_llm(client, monkeypatch):
 
 
 async def test_detect_device_and_maintenance_sheets_by_header(client, monkeypatch):
+    _ai_on(monkeypatch)  # a model IS available here; the point is that it is not asked
+
     async def _boom(*a, **k):  # noqa: ANN002
         raise AssertionError("heuristics should have settled this")
     monkeypatch.setattr(llm, "_chat", _boom)
@@ -200,6 +220,8 @@ async def test_detect_device_and_maintenance_sheets_by_header(client, monkeypatc
 async def test_detect_stream_reports_its_phases(client, monkeypatch):
     """A queue row has to be able to say what it is waiting on. The heuristics settle
     a template sheet outright, so the model phase never appears."""
+    _ai_on(monkeypatch)  # a model IS available here; the point is that it is not asked
+
     async def _boom(*a, **k):  # noqa: ANN002
         raise AssertionError("heuristics should have settled this")
     monkeypatch.setattr(llm, "_chat", _boom)
@@ -254,6 +276,8 @@ async def test_detect_rejects_a_kind_outside_the_allow_list(client, monkeypatch)
 
 
 async def test_detect_says_unknown_when_the_llm_is_down(client, monkeypatch):
+    _ai_on(monkeypatch)
+
     async def _chat(*a, **k):  # noqa: ANN002
         return "not json"
     monkeypatch.setattr(llm, "_chat", _chat)
@@ -616,6 +640,8 @@ async def test_read_does_not_touch_the_model_for_a_template_sheet(client, monkey
     live llama3.1:8b, letting the model read it costs ~25s warm and ~70s cold for a
     fifteen-row record; the parser costs under a millisecond. So the model is not
     asked, and this test fails loudly if that regresses."""
+    _ai_on(monkeypatch)  # a model IS available here; the point is that it is not asked
+
     async def _boom(*a, **k):  # noqa: ANN002
         raise AssertionError("a template sheet must not reach the model")
     monkeypatch.setattr(llm, "_chat", _boom)
@@ -673,6 +699,8 @@ async def test_read_can_be_forced_onto_the_model(client, monkeypatch):
 
 
 async def test_read_503s_when_the_model_is_unusable(client, monkeypatch):
+    _ai_on(monkeypatch)
+
     async def _chat(system, user, **kwargs):
         return "not json at all"
 
@@ -738,6 +766,8 @@ async def test_read_stream_counts_rows_as_the_model_writes_them(client, monkeypa
 async def test_read_stream_delivers_a_failure_as_an_event(client, monkeypatch):
     """The 200 was sent before the read began, so a failure cannot be a status code
     any more — it has to arrive as an event or the screen waits forever."""
+    _ai_on(monkeypatch)
+
     async def _chat_stream(system, user, **kwargs):
         yield "not json at all"
 
@@ -754,12 +784,96 @@ async def test_read_stream_delivers_a_failure_as_an_event(client, monkeypatch):
 
 async def test_warm_never_fails_the_caller(client, monkeypatch):
     """A cold model is a slow import, not a broken one."""
+    _ai_on(monkeypatch)
+
     async def _dead():
         return False
     monkeypatch.setattr(llm, "warm", _dead)
     r = await client.post("/imports/llm/warm")
     assert r.status_code == 200
     assert r.json() == {"warm": False}
+
+
+# ------------------------------------------------ with AI switched off (default)
+#
+# settings.ai_enabled is FALSE in the deployed configuration: the local model
+# server was retired. These are the cases that matter day to day, so they say what
+# happens rather than leaving it to be inferred from the guarded branches above.
+# Note none of them touch monkeypatch — the default IS off, and a test that had to
+# arrange that would stop noticing if the default flipped back.
+
+
+async def test_template_sheet_still_reads_with_no_model_at_all(client):
+    """The one path that has to keep working. The company template is a form, and
+    handover_sheet parses it in plain code — no model was ever involved."""
+    r = await client.post("/imports/handover/read", json={"sheet_text": SHEET_ONE_ITEM})
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["reader"] == "sheet"
+    assert body["parsed"]["items"][0]["serial"] == "5CD03347TB"
+
+
+async def test_off_template_text_is_refused_as_off_template_not_as_an_outage(client):
+    """Prose used to fall through to the model. With no model the honest answer is
+    about the FILE — telling someone the AI is down invites them to retry forever."""
+    prose = (
+        "BIÊN BẢN BÀN GIAO ngày 2026-07-21. Bên A Trịnh Thế Hưng VPHN228. "
+        "Bên B Bùi Thị Thanh VPHN349. HP laptop 5CD03347TB."
+    )
+    assert handover_sheet.read_sheet(prose) is None
+
+    r = await client.post("/imports/handover/read", json={"sheet_text": prose})
+    assert r.status_code == 422
+    assert "mẫu" in r.json()["detail"]
+
+
+async def test_forcing_the_model_falls_back_to_the_parser_instead_of_failing(client):
+    """A stale SPA can still send reader="llm". Honouring it would skip the only
+    reader that works and then report the file as off-template, which is a lie about
+    a file that reads fine."""
+    r = await client.post(
+        "/imports/handover/read",
+        json={"sheet_text": SHEET_ONE_ITEM, "reader": "llm"},
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["reader"] == "sheet"
+
+
+async def test_detect_settles_on_the_heuristics_without_a_model(client, monkeypatch):
+    """The unsure branch used to ask the model. It must not now try and hang."""
+    async def _boom(*a, **k):  # noqa: ANN002
+        raise AssertionError("no model should be contacted while AI is off")
+    monkeypatch.setattr(llm, "_chat", _boom)
+
+    body = (await client.post(
+        "/imports/detect", json={"sheet_text": "một hàng chữ chẳng nói lên điều gì"}
+    )).json()
+    assert body["used_llm"] is False
+    assert body["confident"] is False
+
+
+async def test_warm_answers_without_reaching_for_a_model(client, monkeypatch):
+    """Kept as a 200 rather than deleted so a cached SPA build gets an answer, not a
+    404 in its console."""
+    async def _boom():
+        raise AssertionError("warm must not contact a model while AI is off")
+    monkeypatch.setattr(llm, "warm", _boom)
+
+    r = await client.post("/imports/llm/warm")
+    assert r.status_code == 200
+    assert r.json() == {"warm": False}
+
+
+async def test_extracting_a_pdf_says_what_still_works(client):
+    """A PDF has no reader without OCR. The message names the Excel template rather
+    than a service the user has never heard of."""
+    r = await client.post(
+        "/imports/handover/read",
+        json={"attachment": {"name": "scan.pdf", "mime": "application/pdf",
+                             "data": "JVBERi0xLjQK"}},
+    )
+    assert r.status_code == 503
+    assert "Excel" in r.json()["detail"]
 
 
 # ------------------------------------------------------------------- /plan

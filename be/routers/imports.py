@@ -7,14 +7,15 @@ what will happen:
   POST /imports/handover/plan   fields → what would change (read-only)
   POST /imports/handover/apply  decisions → writes         (one transaction)
 
-`read` tries `be/handover_sheet.py` first — the company template is a fixed form,
-and parsing it costs under a millisecond against the ~25s warm (~70s cold) an 8B
-model takes — and falls back to the LLM (`be/llm.read_handover_minutes`) for a
-scan, a photo, or an off-template file. Either way it throws away anything that
-isn't actually in the file. `plan` reconciles against the ledger and works out each
-line's direction in plain code. `apply` executes the decisions the user confirmed
-and logs whatever is still unsettled to import_issues, which backs the
-Notifications screen.
+`read` parses the company template in `be/handover_sheet.py` — a fixed form, read
+in under a millisecond. It used to fall back to the LLM
+(`be/llm.read_handover_minutes`) for a scan, a photo, or an off-template file; that
+fallback is now behind `settings.ai_enabled`, off since the D:\\LLM model server was
+retired, and an unparseable file is refused rather than guessed at. Either way it
+throws away anything that isn't actually in the file. `plan` reconciles against the
+ledger and works out each line's direction in plain code. `apply` executes the
+decisions the user confirmed and logs whatever is still unsettled to import_issues,
+which backs the Notifications screen.
 
 `read` exists twice over ONE implementation (`_read_events`): the plain endpoint
 drains it and answers once, `/read/stream` forwards each step as SSE so the screen
@@ -38,6 +39,7 @@ from .. import (
     import_detect,
     llm,
 )
+from ..config import settings
 from ..db import get_pool
 from ..handover_import import GHOST_CODE, ISSUE, RETURN, TRANSFER
 from ..models.device import DeviceCreate, DeviceUpdate
@@ -244,7 +246,10 @@ async def _detect_events(req: ReadRequest) -> AsyncIterator[dict]:
     yield {"phase": MATCHING}
     result = import_detect.detect_kind(source_text)
     used_llm = False
-    if not result["confident"]:
+    if not result["confident"] and settings.ai_enabled:
+        # Without the model the heuristics' unsure answer is the answer. That is a
+        # softer landing than it sounds: the caller always shows the kind with an
+        # override, so being wrong costs one click either way.
         yield {"phase": ASKING}
         result = await import_detect.detect_kind_with_llm(source_text, llm._chat)
         used_llm = True
@@ -281,6 +286,12 @@ async def detect_import_kind_stream(req: ReadRequest):
 SCANNING = "scanning"  # locating the form's own table; `total` is settled here
 VERIFYING = "verifying"  # checking every value back against the file
 NO_READING = "Không đọc được biên bản: dịch vụ AI không phản hồi. Thử lại sau."
+# The only refusal that can happen while AI is switched off, which is the normal
+# state — so it names the one thing that does work instead of the one that doesn't.
+NOT_THE_TEMPLATE = (
+    "File này không đúng mẫu biên bản bàn giao của công ty. "
+    "Chỉ nhập được file Excel (.xlsx) theo đúng mẫu."
+)
 
 
 async def _read_events(req: ReadRequest) -> AsyncIterator[dict]:
@@ -304,8 +315,17 @@ async def _read_events(req: ReadRequest) -> AsyncIterator[dict]:
     yield {"phase": SCANNING, "total": total}
 
     reader = "sheet"
-    raw = None if req.reader == "llm" else handover_sheet.read_sheet(source_text)
+    # `reader="llm"` is honoured only when there is a model to honour it with —
+    # otherwise it would skip the one parser that works and report the file as
+    # off-template, which is a lie about a file that reads fine.
+    use_llm = req.reader == "llm" and settings.ai_enabled
+    raw = None if use_llm else handover_sheet.read_sheet(source_text)
     if raw is None:
+        if not settings.ai_enabled:
+            # The form parser is all there is now. It failing means the file is not
+            # the company template — a different fact from "the reader broke", and
+            # worth saying so rather than reporting the AI outage it used to be.
+            raise HTTPException(422, NOT_THE_TEMPLATE)
         reader = "llm"
         async for event in llm.read_handover_minutes_stream(source_text):
             if event["phase"] == llm.DONE:
@@ -358,7 +378,13 @@ async def warm_llm():
     ~44 seconds, which the first import of the morning paid in full before reading
     a single field. The import dialog calls this when it opens, so the load overlaps
     the time a human spends choosing a file. Never fails the caller.
+
+    A no-op while AI is off, which is the current state. Kept as an endpoint rather
+    than deleted so an older cached build of the SPA still gets a 200 here instead of
+    a 404 in its console.
     """
+    if not settings.ai_enabled:
+        return {"warm": False}
     return {"warm": await llm.warm()}
 
 

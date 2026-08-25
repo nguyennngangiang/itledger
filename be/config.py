@@ -20,9 +20,28 @@ class Settings:
         "CORS_ORIGINS", "http://localhost:5173"
     ).split(",")
     # Local semantic-search embedding service (see ai/main.py) — embedding-only.
+    # Not started by the deployment any more: the three /semantic-search endpoints
+    # it backs were only ever called by Ask AI. See `ai_enabled` below.
     ai_url: str = os.getenv("AI_URL", "http://localhost:8001")
+
+    # MASTER SWITCH for everything that leaves this host to reach a model, and it
+    # is OFF unless someone sets it. The LLM stack at D:\LLM was retired — it held
+    # ~6 GB of RAM and 88% of the GPU's VRAM resident to serve one button — so the
+    # endpoints below answer nothing, and code that calls them would hang for its
+    # full timeout before failing. Guarded call sites: be/extract.py,
+    # be/routers/imports.py, be/llm.rerank_results. The Ask AI router is not
+    # mounted at all (see be/main.py).
+    #
+    # Turning this back on takes three things: AI_ENABLED=1, the LLM_* variables
+    # restored to be/.env, and the D:\LLM stack running. The Ask AI *UI* is gone
+    # from the frontend and would need a revert on top of that.
+    ai_enabled: bool = os.getenv("AI_ENABLED", "0").strip().lower() in (
+        "1", "true", "yes", "on",
+    )
+
     # Internal-network OpenAI-compatible LLM (see be/llm.py). Key is a secret —
     # keep it in be/.env (gitignored), never in docker-compose.yml or git.
+    # Inert while ai_enabled is false.
     llm_base_url: str = os.getenv("LLM_BASE_URL", "http://192.168.3.252:8443/v1")
     llm_api_key: str = os.getenv("LLM_API_KEY", "")
     llm_model: str = os.getenv("LLM_MODEL", "llama3.1:8b")

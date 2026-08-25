@@ -4,7 +4,7 @@
 //   apply → the decisions the user confirmed → one transaction
 // Plus the import-issue log that backs the Notifications screen.
 import { ApiError, request, streamRequest } from './client'
-import type { Attachment } from './assistant'
+import type { Attachment } from '../lib/files'
 import type { Device, DeviceStatus, User } from '../types'
 
 // Which way a movement goes. Decided by the backend from ranked evidence — the
@@ -281,18 +281,6 @@ export async function readHandoverMinutesStreaming(
     if (event.phase === 'error') throw new ApiError(event.status, event.detail)
   }
   throw new ApiError(503, 'The read ended without a result.')
-}
-
-/** Ask the model server to load the model now, before anyone needs it.
- *
- * Ollama unloads after ten idle minutes and llama3.1:8b takes ~44s to load, which
- * the first import of the day used to pay in full mid-read. Called when the import
- * dialog opens so the load overlaps choosing a file. Deliberately swallows its own
- * failure: a cold model is a slow import, not a broken one. */
-export function warmLlm() {
-  return request<{ warm: boolean }>('/imports/llm/warm', { method: 'POST' }).catch(
-    () => ({ warm: false }),
-  )
 }
 
 export function planHandoverImport(

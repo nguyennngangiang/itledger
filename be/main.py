@@ -10,7 +10,7 @@ from .repositories.errors import (
     InUseError,
     ProtectedError,
 )
-from .routers import assistant, devices, feedback, handovers, imports, maintenance, users
+from .routers import devices, feedback, handovers, imports, maintenance, users
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -58,8 +58,13 @@ app.include_router(handovers.router)
 app.include_router(maintenance.router)
 app.include_router(users.router)
 app.include_router(feedback.router)
-app.include_router(assistant.router)
 app.include_router(imports.router)
+
+# routers/assistant.py is deliberately NOT mounted. It is the Ask AI feature, and
+# the LLM stack it talked to has been retired, so /assistant/* answers 404 rather
+# than spending its full timeout reaching for a host that is not listening. The
+# module is kept on disk: restoring the import and this line, plus AI_ENABLED=1 and
+# a running model server, is the whole of turning it back on.
 
 
 @app.get("/health", tags=["meta"])

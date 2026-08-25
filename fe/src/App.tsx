@@ -23,7 +23,6 @@ import { ImportModal } from "./components/Modal/ImportModal";
 import type { ImportKind } from "./components/Modal/ImportModal";
 import { countOpenIssues } from "./api/imports";
 import { useWindowFileDrop } from "./lib/useFileDrop";
-import { AssistantModal } from "./components/Modal/AssistantModal";
 import { CreateDeviceModal } from "./components/Modal/CreateDeviceModal";
 import MaintenanceModal from "./components/Modal/MaintenanceModal";
 import HandoverModal from "./components/Modal/HandoverModal";
@@ -37,7 +36,6 @@ import {
   PlusIcon,
   BellIcon,
   GlobeIcon,
-  SparklesIcon,
   UploadIcon,
   ChevronDownIcon,
 } from "./components/icons";
@@ -96,11 +94,6 @@ function App() {
   // null = closed. "auto" lets the importer detect the file's kind.
   const [importKind, setImportKind] = useState<ImportKind | "auto" | null>(null);
   const [importMenu, setImportMenu] = useState(false);
-  // Ask AI lives in the header, not on the Devices screen: it answers across
-  // devices, repairs and handovers, so tying it to one tab hid it from the other
-  // three. The chat itself is stored per browser session, so moving between tabs
-  // no longer loses it either.
-  const [showAssistant, setShowAssistant] = useState(false);
 
   // Files dragged onto the window, handed to the importer. `at` is the trigger, not
   // the array: dropping a second batch onto the already-open dialog has to append,
@@ -219,15 +212,6 @@ function App() {
           </nav>
 
           <div className="topbar-actions">
-            <button
-              className="topbar-btn"
-              onClick={() => setShowAssistant(true)}
-              title={t("header.askAiTitle")}
-            >
-              <SparklesIcon size={15} />
-              <span>{t("header.askAi")}</span>
-            </button>
-
             {/* Four separate add buttons collapsed into one menu. Hover opens it
                 for the mouse; click opens it too, because hover alone is not
                 reachable by keyboard or on a touch screen. */}
@@ -362,11 +346,6 @@ function App() {
       {createModal === "maintenance" && <MaintenanceModal onClose={closeCreate} />}
       {createModal === "handover" && <HandoverModal onClose={closeCreate} />}
       {createModal === "employee" && <EmployeeModal onClose={closeCreate} />}
-
-      <AssistantModal
-        open={showAssistant}
-        onClose={() => setShowAssistant(false)}
-      />
 
       {/* The drag target. Only shown when the dialog is CLOSED — once it is open it
           has its own drop zone, and two overlapping "drop here" surfaces is one

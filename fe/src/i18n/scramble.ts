@@ -85,8 +85,6 @@ export const SCRAMBLE: Partial<Record<Key, [Lang, string]>> = {
   "header.bellTitle": ["pirate", "Booty left o'er from yer imports"],
   "header.bell.none": ["pirate", "Tidings — nary a thing to do"],
   "header.bell.some": ["pirate", "Tidings — {n} matters to settle, arrr"],
-  "header.askAi": ["emoji", "✨ Ask AI"],
-  "header.askAiTitle": ["emoji", "🤖 Ask the AI about your fleet"],
   "header.scramble.on": ["emoji", "🌍🔀 Shuffle"],
   "header.scramble.off": ["emoji", "🇬🇧 Back to English"],
 
@@ -238,7 +236,6 @@ export const SCRAMBLE: Partial<Record<Key, [Lang, string]>> = {
     "vi",
     "File này không đúng mẫu (bản scan, ảnh, hoặc mẫu cũ) nên model phải tìm các trường. Mọi giá trị vẫn được đối chiếu lại với file.",
   ],
-  "hi.action.rereadAi": ["vi", "Đọc lại bằng AI"],
   "hi.err.read": ["vi", "Không đọc được file này."],
   "hi.err.reconcile": ["vi", "Đối chiếu thất bại."],
   "hi.err.import": ["vi", "Import thất bại."],
@@ -426,30 +423,6 @@ export const SCRAMBLE: Partial<Record<Key, [Lang, string]>> = {
   "device.autoFixed": ["leet", "4ut0-c0rr3ct3d fr0m “{value}”"],
   "device.undoFix": ["leet", "und0"],
   "employee.namePlaceholder": ["de", "z. B. Nguyễn Văn A"],
-
-  // ------------------------------------------------------------------- Ask AI
-  "ai.err.unsupported": ["pirate", "That be no format I can read: {name}"],
-  "ai.err.tooBig": ["pirate", "That file be too heavy (>15MB): {name}"],
-  "ai.err.tooMany": ["pirate", "No more than {max} files in one haul."],
-  "ai.readAttachment": ["pirate", "Read the attached scroll and sum it up."],
-  "ai.handoff": ["pirate", "Reconcile 'n' import “{name}”"],
-  "ai.handoffSkip": ["pirate", "Belay that"],
-  "ai.title": ["pirate", "Ask the Oracle — moored to yer own fleet"],
-  "ai.newChat": ["pirate", "Fresh parley"],
-  "ai.intro": [
-    "pirate",
-    "Ask aught about yer devices, or pin a file (image, PDF, Word, Excel…) an' I'll read it an' answer — anchored to yer own fleet's records.",
-  ],
-  "ai.attach": ["pirate", "Pin files (image, PDF, Word, Excel…)"],
-  "ai.placeholder": ["pirate", "e.g. Which Dell machines have sailed over 5 years?"],
-  "ai.ask": ["pirate", "Ask"],
-  "ai.failed": ["pirate", "The Oracle be silent: {error}"],
-  "ai.suggest.oldest": ["pirate", "Which laptops be oldest an' due for scuttlin'?"],
-  "ai.suggest.perTeam": ["pirate", "How many devices be each crew assigned?"],
-  "ai.suggest.mostRepaired": ["pirate", "List the devices patched the most."],
-  "ai.suggest.inStock": ["pirate", "What be in the hold an' unassigned right now?"],
-  "ai.toolCalls": ["pirate", "{n} tool calls"],
-  "ai.toolCalls.one": ["pirate", "1 tool call"],
 
   // ------------------------------------------------------------ device export
   "export.button": ["ko", "내보내기"],

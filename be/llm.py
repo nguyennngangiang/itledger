@@ -1,5 +1,12 @@
 """Thin OpenAI-compatible LLM client for the internal-network model.
 
+MOSTLY DORMANT. The model server this talks to — the D:\\LLM stack on this host —
+was retired, so `settings.ai_enabled` is off and the callers are guarded: the Ask
+AI router is not mounted, `rerank_results` returns its input untouched, and the
+import reader never reaches `read_handover_minutes`. Nothing here was deleted,
+because the guards are one flag and the stack could come back; but nothing here
+runs today either. Check `settings.ai_enabled` before adding a new caller.
+
 Talks to `settings.llm_base_url` (e.g. http://192.168.3.252:8443/v1) using the
 Chat Completions API with a Bearer key from be/.env. This is the ONLY place that
 calls the LLM; routers use the helpers here.
@@ -436,8 +443,11 @@ async def rerank_results(
     """Reorder already-ranked `results` (row dicts, each with a `document`) using
     the LLM, attaching a one-line `reason`. `id_key` is the row's id field
     (serial_number / maintenance_id / handover_id). Falls back to the input order
-    if the LLM can't rerank, so search never hard-fails."""
-    if not results:
+    if the LLM can't rerank, so search never hard-fails — and with
+    `settings.ai_enabled` off, that fallback is the only path: returning the
+    embedder's order at once beats burning a 180s timeout to arrive at the same
+    answer."""
+    if not results or not settings.ai_enabled:
         return results
     candidates = [{"id": r[id_key], "text": r.get("document", "")} for r in results]
     order = await rerank(query, candidates, examples, top_k=len(results))

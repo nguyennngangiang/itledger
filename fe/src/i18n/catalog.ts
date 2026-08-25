@@ -47,8 +47,6 @@ export const EN = {
   "header.bellTitle": "Work left over from imports",
   "header.bell.none": "Notifications — nothing to do",
   "header.bell.some": "Notifications — {n} to deal with",
-  "header.askAi": "Ask AI",
-  "header.askAiTitle": "Ask the AI about your fleet — it reads your own data",
   "header.scramble.on": "Shuffle the languages",
   "header.scramble.off": "Back to English",
 
@@ -183,7 +181,6 @@ export const EN = {
   "hi.reader.llm": "read by AI",
   "hi.reader.llm.why":
     "This file is not on the template (a scan, a photo, or an older form), so the model located the fields. Every value was still checked back against the file.",
-  "hi.action.rereadAi": "Read again with AI",
   "hi.err.read": "That file could not be read.",
   "hi.err.reconcile": "Reconciling failed.",
   "hi.err.import": "Import failed.",
@@ -341,12 +338,6 @@ export const EN = {
   "device.autoFixed": "auto-corrected from “{value}”",
   "device.undoFix": "undo",
   "employee.namePlaceholder": "e.g. Nguyễn Văn A",
-  "ai.err.unsupported": "Unsupported file type: {name}",
-  "ai.err.tooBig": "File is too large (>15MB): {name}",
-  "ai.err.tooMany": "At most {max} files at a time.",
-  "ai.readAttachment": "Read and summarise the attached file.",
-  "ai.handoff": "Reconcile & import “{name}”",
-  "ai.handoffSkip": "Skip",
 
   // ------------------------------------------------------------ device export
   "export.button": "Export",
@@ -589,21 +580,6 @@ export const EN = {
   "employeeForm.statusHint":
     "Retired keeps the person in the ledger — their handover history still reads, and any device they never returned stays visible. Use the trash only for a row entered by mistake.",
   "employeeForm.failed": "Failed to save employee",
-
-  "ai.title": "Ask AI — grounded in your fleet",
-  "ai.newChat": "New chat",
-  "ai.intro":
-    "Ask anything about your devices, or attach a file (image, PDF, Word, Excel…) and I'll read it and answer — grounded in your fleet's own data.",
-  "ai.attach": "Attach files (image, PDF, Word, Excel…)",
-  "ai.placeholder": "e.g. Which Dell machines are over 5 years old?",
-  "ai.ask": "Ask",
-  "ai.failed": "Assistant failed: {error}",
-  "ai.suggest.oldest": "Which laptops are oldest and due for replacement?",
-  "ai.suggest.perTeam": "How many devices is each team assigned?",
-  "ai.suggest.mostRepaired": "List the devices repaired the most.",
-  "ai.suggest.inStock": "What's in stock and unassigned right now?",
-  "ai.toolCalls": "{n} tool calls",
-  "ai.toolCalls.one": "1 tool call",
 
   "paging.range": "{from}–{to} of {n}",
   "owner.store": "IT Store",
