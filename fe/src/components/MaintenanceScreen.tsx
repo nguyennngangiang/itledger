@@ -39,7 +39,11 @@ export const MaintenanceScreen = ({
   const [editTarget, setEditTarget] = useState<Maintenance | null>(null);
   const [bulkConfirm, setBulkConfirm] = useState(false);
   const [selected, setSelected] = useState<Maintenance | null>(null);
-  const [deviceHistory, setDeviceHistory] = useState<Maintenance[]>([]);
+  // Tagged with the device it belongs to — see the note in HandoverScreen.
+  const [history, setHistory] = useState<{
+    deviceId: string;
+    rows: Maintenance[];
+  } | null>(null);
 
   const list = usePagedList<Maintenance>(pageMaintenance, {
     defaultOrderBy: "maintenance_date",
@@ -49,24 +53,31 @@ export const MaintenanceScreen = ({
   const { selectedKeys, setSelectedKeys, clear, rowSelection } =
     useTableSelection(list.trashed);
 
-  // Selecting a repair loads that device's full history for the story panel.
+  // Selecting a repair loads that device's full history for the story panel. The
+  // effect only fetches; what the panel shows is derived below.
   useEffect(() => {
-    if (!selected?.device_id) {
-      setDeviceHistory(selected ? [selected] : []);
-      return;
-    }
+    const deviceId = selected?.device_id;
+    if (!deviceId) return;
     let cancelled = false;
-    listMaintenance(selected.device_id)
-      .then((rows) => {
-        if (!cancelled) setDeviceHistory(rows);
-      })
-      .catch(() => {
-        if (!cancelled) setDeviceHistory([selected]);
-      });
+    listMaintenance(deviceId).then(
+      (rows) => {
+        if (!cancelled) setHistory({ deviceId, rows });
+      },
+      () => {
+        if (!cancelled) setHistory({ deviceId, rows: selected ? [selected] : [] });
+      },
+    );
     return () => {
       cancelled = true;
     };
   }, [selected]);
+
+  const deviceHistory =
+    selected === null
+      ? []
+      : history?.deviceId === selected.device_id
+        ? history.rows
+        : [selected];
 
   const handleBulkDelete = async () => {
     setBulkConfirm(false);
@@ -314,6 +325,7 @@ export const MaintenanceScreen = ({
 
       {editTarget && (
         <MaintenanceModal
+          key={editTarget.maintenance_id}
           isEdit
           maintenance={editTarget}
           onClose={() => {

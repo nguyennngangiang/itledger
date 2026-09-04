@@ -197,6 +197,12 @@ export function ImportHandoverModal({
   useEffect(() => {
     // The file identity is the trigger; `pick` is recreated every render, so
     // depending on it would re-read the same file on every keystroke elsewhere.
+    //
+    // `pick` raises the busy flag and drops the previous error synchronously, which
+    // is what the compiler rule objects to. A record arriving from outside this
+    // component IS the event, and a read that can take a minute has to say so from
+    // the first frame — see the progress note in CLAUDE.md.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     if (file) pick(file, sourceText);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [file, sourceText]);

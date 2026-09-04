@@ -85,6 +85,11 @@ export function NotificationScreen({
   }, [status, t]);
 
   useEffect(() => {
+    // `load` raises the loading flag before it awaits, which the compiler rule
+    // reads as a synchronous setState. That is exactly what it should do: this
+    // screen re-checks every open issue against the database on the way in, which
+    // takes long enough that showing nothing would look broken.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     load();
   }, [load, refreshKey]);
 
@@ -377,6 +382,7 @@ export function NotificationScreen({
 
       {completing && (
         <CreateDeviceModal
+          key={completing.device.serial_number}
           isEdit
           device={completing.device}
           // Only a real save closes the issue — Cancel must leave it open.

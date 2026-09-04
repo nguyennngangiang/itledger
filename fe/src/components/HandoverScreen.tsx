@@ -39,7 +39,12 @@ export const HandoverScreen = ({
   const [editTarget, setEditTarget] = useState<Handover | null>(null);
   const [bulkConfirm, setBulkConfirm] = useState(false);
   const [selected, setSelected] = useState<Handover | null>(null);
-  const [deviceHandovers, setDeviceHandovers] = useState<Handover[]>([]);
+  // Tagged with the device it belongs to, so the panel can tell "this machine's
+  // history" from "the previous machine's history, still on screen".
+  const [history, setHistory] = useState<{
+    deviceId: string;
+    rows: Handover[];
+  } | null>(null);
 
   const list = usePagedList<Handover>(pageHandovers, {
     defaultOrderBy: "handover_date",
@@ -50,24 +55,33 @@ export const HandoverScreen = ({
     useTableSelection(list.trashed);
 
   // Selecting a handover loads that device's full transfer history for the
-  // journey panel (not just the current page of results).
+  // journey panel (not just the current page of results). The effect only fetches
+  // — what the panel shows is derived below, so a row with no device, a failed
+  // fetch and a fetch still in flight all fall back to the selected row itself
+  // rather than to whatever the previously selected machine left behind.
   useEffect(() => {
-    if (!selected?.device_id) {
-      setDeviceHandovers(selected ? [selected] : []);
-      return;
-    }
+    const deviceId = selected?.device_id;
+    if (!deviceId) return;
     let cancelled = false;
-    listHandovers(selected.device_id)
-      .then((rows) => {
-        if (!cancelled) setDeviceHandovers(rows);
-      })
-      .catch(() => {
-        if (!cancelled) setDeviceHandovers([selected]);
-      });
+    listHandovers(deviceId).then(
+      (rows) => {
+        if (!cancelled) setHistory({ deviceId, rows });
+      },
+      () => {
+        if (!cancelled) setHistory({ deviceId, rows: selected ? [selected] : [] });
+      },
+    );
     return () => {
       cancelled = true;
     };
   }, [selected]);
+
+  const deviceHandovers =
+    selected === null
+      ? []
+      : history?.deviceId === selected.device_id
+        ? history.rows
+        : [selected];
 
   const handleBulkDelete = async () => {
     setBulkConfirm(false);
@@ -274,6 +288,9 @@ export const HandoverScreen = ({
 
       {editTarget && (
         <HandoverModal
+          // Remount per row: the form prefills from initial state, so the same
+          // mounted modal must never be handed a different record.
+          key={editTarget.handover_id}
           isEdit
           handover={editTarget}
           onClose={() => {

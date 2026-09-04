@@ -71,15 +71,24 @@ function MaintenanceModal({
   maintenance?: Maintenance;
 }) {
   const { t } = useT();
-  const [serialNumber, setSerialNumber] = useState("");
-  const [teamId, setTeamId] = useState("");
-  const [part, setPart] = useState("");
-  const [problem, setProblem] = useState("");
-  const [solution, setSolution] = useState("");
-  const [result, setResult] = useState("");
-  const [cost, setCost] = useState<number | null>(null);
-  const [remark, setRemark] = useState("");
-  const [maintenanceDate, setMaintenanceDate] = useState(todayIsoDate());
+  // Editing prefills through the initial state rather than an effect that
+  // overwrites it a render later. MaintenanceScreen mounts this modal fresh per
+  // row ({editTarget && …}, keyed on the row id), so `maintenance` never changes
+  // underneath a mounted form.
+  const editing = isEdit ? maintenance : undefined;
+  const [serialNumber, setSerialNumber] = useState(
+    () => editing?.device_id ?? "",
+  );
+  const [teamId, setTeamId] = useState(() => editing?.team ?? "");
+  const [part, setPart] = useState(() => editing?.part ?? "");
+  const [problem, setProblem] = useState(() => editing?.reason ?? "");
+  const [solution, setSolution] = useState(() => editing?.solution ?? "");
+  const [result, setResult] = useState(() => editing?.result ?? "");
+  const [cost, setCost] = useState<number | null>(() => editing?.cost_vnd ?? null);
+  const [remark, setRemark] = useState(() => editing?.remarks ?? "");
+  const [maintenanceDate, setMaintenanceDate] = useState(
+    () => editing?.maintenance_date ?? todayIsoDate(),
+  );
   const [devices, setDevices] = useState<Device[]>([]);
   const [teams, setTeams] = useState<string[]>([]);
   const [suggestions, setSuggestions] = useState<Record<string, string[]>>({});
@@ -113,21 +122,6 @@ function MaintenanceModal({
       })
       .finally(() => setLoading(false));
   }, [t]);
-
-  // Prefill when editing an existing record.
-  useEffect(() => {
-    if (isEdit && maintenance) {
-      setSerialNumber(maintenance.device_id ?? "");
-      setTeamId(maintenance.team ?? "");
-      setPart(maintenance.part ?? "");
-      setProblem(maintenance.reason ?? "");
-      setSolution(maintenance.solution ?? "");
-      setResult(maintenance.result ?? "");
-      setCost(maintenance.cost_vnd ?? null);
-      setRemark(maintenance.remarks ?? "");
-      setMaintenanceDate(maintenance.maintenance_date ?? todayIsoDate());
-    }
-  }, [isEdit, maintenance]);
 
   // Team always follows the selected device's owner team.
   const handleDeviceChange = (serial: string) => {

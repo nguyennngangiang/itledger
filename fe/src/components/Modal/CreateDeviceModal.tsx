@@ -111,7 +111,29 @@ export function CreateDeviceModal({
   const [submitting, setSubmitting] = useState(false);
   const [users, setUsers] = useState<User[]>([]);
   const [suggestions, setSuggestions] = useState<Record<string, string[]>>({});
-  const [form, setForm] = useState<FormState>(EMPTY);
+  // Editing prefills through the initial state rather than an effect that
+  // overwrites EMPTY a render later. Both screens that open this for editing
+  // mount it fresh per row ({editTarget && …} / {completing && …}, keyed on the
+  // serial), so `device` never changes underneath a mounted form.
+  const [form, setForm] = useState<FormState>(() =>
+    isEdit && device
+      ? {
+          serial_number: device.serial_number,
+          barcode: device.barcode ?? "",
+          type: device.type ?? "",
+          brand: device.brand ?? "",
+          cpu: device.cpu ?? "",
+          ram: device.ram ?? "",
+          storage: device.storage ?? "",
+          os: device.os ?? "",
+          msoffice: device.msoffice ?? "",
+          buy_date: device.buy_date ?? "",
+          name: device.name ?? "",
+          user_id: device.user_id ?? GHOST_USER_CODE,
+          status: (device.status as DeviceStatus) ?? "in_stock",
+        }
+      : EMPTY,
+  );
   // field -> what the user originally typed, when we tidied it on blur.
   const [corrected, setCorrected] = useState<Partial<Record<keyof FormState, string>>>({});
   const serialRef = useRef<InputRef>(null);
@@ -129,26 +151,6 @@ export function CreateDeviceModal({
       .then(setSuggestions)
       .catch(() => setSuggestions({}));
   }, []);
-
-  useEffect(() => {
-    if (isEdit && device) {
-      setForm({
-        serial_number: device.serial_number,
-        barcode: device.barcode ?? "",
-        type: device.type ?? "",
-        brand: device.brand ?? "",
-        cpu: device.cpu ?? "",
-        ram: device.ram ?? "",
-        storage: device.storage ?? "",
-        os: device.os ?? "",
-        msoffice: device.msoffice ?? "",
-        buy_date: device.buy_date ?? "",
-        name: device.name ?? "",
-        user_id: device.user_id ?? GHOST_USER_CODE,
-        status: (device.status as DeviceStatus) ?? "in_stock",
-      });
-    }
-  }, [isEdit, device]);
 
   const set = (key: keyof FormState, value: string) =>
     setForm((prev) => ({ ...prev, [key]: value }));

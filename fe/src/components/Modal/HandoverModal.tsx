@@ -91,10 +91,27 @@ function HandoverModal({
   handover?: Handover;
 }) {
   const { t } = useT();
-  const [lines, setLines] = useState<Line[]>([]);
-  const [toEmployeeCode, setToEmployeeCode] = useState("");
-  const [handoverDate, setHandoverDate] = useState(todayIsoDate());
-  const [reason, setReason] = useState("");
+  // Editing prefills through the initial state rather than an effect that
+  // overwrites it a render later. The screens mount this modal fresh per row
+  // ({editTarget && <HandoverModal …/>}, keyed on the row id), so `handover`
+  // never changes underneath a mounted form.
+  //
+  // A ledger row is still one device, so editing works on exactly one line — the
+  // multi-device part is about recording a new record, not about rewriting one
+  // that was already written.
+  const editing = isEdit ? handover : undefined;
+  const [lines, setLines] = useState<Line[]>(() =>
+    editing?.device_id
+      ? [{ serial: editing.device_id, from: editing.from_user_id ?? "" }]
+      : [],
+  );
+  const [toEmployeeCode, setToEmployeeCode] = useState(
+    () => editing?.to_user_id ?? "",
+  );
+  const [handoverDate, setHandoverDate] = useState(
+    () => editing?.handover_date ?? todayIsoDate(),
+  );
+  const [reason, setReason] = useState(() => editing?.reason ?? "");
   const [devices, setDevices] = useState<Device[]>([]);
   const [users, setUsers] = useState<User[]>([]);
   const [reasonHints, setReasonHints] = useState<string[]>([]);
@@ -121,22 +138,6 @@ function HandoverModal({
       })
       .finally(() => setLoading(false));
   }, [t]);
-
-  // Prefill when editing an existing handover. A ledger row is still one device,
-  // so editing works on exactly one line — the multi-device part is about
-  // recording a new record, not about rewriting one that was already written.
-  useEffect(() => {
-    if (isEdit && handover) {
-      setLines(
-        handover.device_id
-          ? [{ serial: handover.device_id, from: handover.from_user_id ?? "" }]
-          : [],
-      );
-      setToEmployeeCode(handover.to_user_id ?? "");
-      setHandoverDate(handover.handover_date ?? todayIsoDate());
-      setReason(handover.reason ?? "");
-    }
-  }, [isEdit, handover]);
 
   /** Picking devices fills in who is handing each one over — by definition that
    *  is the device's current owner, and we already hold that in memory. Lines
