@@ -1,16 +1,16 @@
 import { useEffect, useState } from "react";
 import { AutoComplete, Button, DatePicker, Select } from "antd";
 import dayjs from "dayjs";
-import { listDevices, updateDevice } from "../../api/devices";
+import { listDevices } from "../../api/devices";
 import {
-  createHandover,
+  createHandoverBatch,
   handoverSuggestions,
   updateHandover,
 } from "../../api/handovers";
 import { listUsers } from "../../api/users";
 import { ApiError } from "../../api/client";
 import type { Device, Handover, HandoverCreate, User } from "../../types";
-import { GHOST_USER_CODE } from "../../types";
+import { DEVICE_STATUS_META, GHOST_USER_CODE } from "../../types";
 import { newId } from "../../lib/id";
 import { deriveStatus, ownerOptionLabel, todayIsoDate } from "../../lib/format";
 import { Modal } from "./Modal";
@@ -20,6 +20,17 @@ function emptyToNull(value: string): string | null {
   const trimmed = value.trim();
   return trimmed === "" ? null : trimmed;
 }
+
+/** One line of the record: a device and the person handing it over.
+ *
+ * A record now routinely moves two or three machines at once, and those machines
+ * are not necessarily coming from the same person — IT collecting three laptops
+ * back into the store collects them from three desks. So the recipient, the date
+ * and the reason belong to the record, while `from` belongs to the line. That is
+ * also the shape the spreadsheet importer produces (be/handover_sheet.py reads a
+ * multi-row item table), so both entry paths now agree.
+ */
+type Line = { serial: string; from: string };
 
 // Picking this reason means the machine is coming back to IT, so the receiver is
 // the IT-STORE ghost and the device lands in stock. Recognised by meaning, not by
@@ -80,8 +91,7 @@ function HandoverModal({
   handover?: Handover;
 }) {
   const { t } = useT();
-  const [serialNumber, setSerialNumber] = useState("");
-  const [fromEmployeeCode, setFromEmployeeCode] = useState("");
+  const [lines, setLines] = useState<Line[]>([]);
   const [toEmployeeCode, setToEmployeeCode] = useState("");
   const [handoverDate, setHandoverDate] = useState(todayIsoDate());
   const [reason, setReason] = useState("");
@@ -112,31 +122,60 @@ function HandoverModal({
       .finally(() => setLoading(false));
   }, [t]);
 
-  // Prefill when editing an existing handover.
+  // Prefill when editing an existing handover. A ledger row is still one device,
+  // so editing works on exactly one line — the multi-device part is about
+  // recording a new record, not about rewriting one that was already written.
   useEffect(() => {
     if (isEdit && handover) {
-      setSerialNumber(handover.device_id ?? "");
-      setFromEmployeeCode(handover.from_user_id ?? "");
+      setLines(
+        handover.device_id
+          ? [{ serial: handover.device_id, from: handover.from_user_id ?? "" }]
+          : [],
+      );
       setToEmployeeCode(handover.to_user_id ?? "");
       setHandoverDate(handover.handover_date ?? todayIsoDate());
       setReason(handover.reason ?? "");
     }
   }, [isEdit, handover]);
 
-  /** Picking a device fills in who is handing it over — by definition that is
-   *  the device's current owner, and we already hold that in memory. */
-  const handleDeviceChange = (serial: string) => {
-    setSerialNumber(serial);
-    const dev = devices.find((d) => d.serial_number === serial);
-    if (dev) setFromEmployeeCode(dev.user_id ?? GHOST_USER_CODE);
+  /** Picking devices fills in who is handing each one over — by definition that
+   *  is the device's current owner, and we already hold that in memory. Lines
+   *  already on screen keep whatever `from` was typed on them; only the newly
+   *  picked serials are filled in. */
+  const handleDevicesChange = (value: string | string[]) => {
+    const serials = Array.isArray(value) ? value : value ? [value] : [];
+    setLines((prev) => {
+      const existing = new Map(prev.map((line) => [line.serial, line]));
+      return serials.map((serial) => {
+        const kept = existing.get(serial);
+        if (kept) return kept;
+        const dev = devices.find((d) => d.serial_number === serial);
+        return { serial, from: dev ? dev.user_id ?? GHOST_USER_CODE : "" };
+      });
+    });
   };
+
+  const setLineFrom = (serial: string, from: string) =>
+    setLines((prev) =>
+      prev.map((line) => (line.serial === serial ? { ...line, from } : line)),
+    );
+
+  const removeLine = (serial: string) =>
+    setLines((prev) => prev.filter((line) => line.serial !== serial));
 
   const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
     setError(null);
 
-    if (fromEmployeeCode === toEmployeeCode) {
-      setError(t("handoverForm.samePerson"));
+    if (lines.length === 0) {
+      setError(t("handoverForm.noDevice"));
+      return;
+    }
+    // Named per device rather than as one blanket message: with three machines on
+    // screen, "from and to must differ" does not say which one is wrong.
+    const clash = lines.find((line) => line.from === toEmployeeCode);
+    if (clash) {
+      setError(t("handoverForm.samePersonFor", { serial: clash.serial }));
       return;
     }
 
@@ -144,10 +183,11 @@ function HandoverModal({
 
     try {
       if (isEdit && handover) {
+        const [line] = lines;
         await updateHandover(handover.handover_id, {
           handover_date: handoverDate,
-          device_id: serialNumber,
-          from_user_id: fromEmployeeCode,
+          device_id: line.serial,
+          from_user_id: line.from,
           to_user_id: toEmployeeCode,
           reason: emptyToNull(reason),
         });
@@ -155,33 +195,21 @@ function HandoverModal({
         return;
       }
 
-      const record: HandoverCreate = {
+      // One call, one transaction. Recording the handover and moving the device
+      // used to be two separate requests from here, so a failure between them
+      // left the history written and the machine still on its old owner — and
+      // three devices meant six requests and six ways to end up half-recorded.
+      // POST /handovers/batch does both for every line or neither for any.
+      const records: HandoverCreate[] = lines.map((line) => ({
         handover_id: newId(),
         handover_date: handoverDate,
-        device_id: serialNumber,
-        from_user_id: fromEmployeeCode,
+        device_id: line.serial,
+        from_user_id: line.from,
         to_user_id: toEmployeeCode,
         reason: emptyToNull(reason),
-      };
+      }));
 
-      await createHandover(record);
-
-      // Recording the handover is only half of it — the device itself has to
-      // change hands, or the fleet still shows the previous owner. Status
-      // follows the new owner (deriveStatus keeps maintaining/on_del as-is).
-      const dev = devices.find((d) => d.serial_number === serialNumber);
-      try {
-        await updateDevice(serialNumber, {
-          user_id: toEmployeeCode,
-          status: deriveStatus(toEmployeeCode, dev?.status ?? null),
-        });
-      } catch {
-        // The handover is already recorded; don't lose it over this.
-        setError(
-          t("handoverForm.ownerNotUpdated"),
-        );
-      }
-
+      await createHandoverBatch(records);
       onClose();
     } catch (err) {
       setError(
@@ -203,7 +231,9 @@ function HandoverModal({
       ? "handoverForm.loadingDevices"
       : loadError
         ? "handoverForm.devicesFailed"
-        : "handoverForm.pickDevice",
+        : isEdit
+          ? "handoverForm.pickDevice"
+          : "handoverForm.pickDevices",
   );
   const employeePlaceholder = t(
     loading
@@ -212,8 +242,6 @@ function HandoverModal({
         ? "handoverForm.employeesFailed"
         : "handoverForm.pickEmployee",
   );
-
-  const selectedDevice = devices.find((d) => d.serial_number === serialNumber);
 
   /** Choosing a "return to IT" reason routes the device to the store account —
    *  that IS the reason, so making the person pick IT Store again is busywork.
@@ -263,6 +291,9 @@ function HandoverModal({
     label: ownerOptionLabel(u, t),
   }));
 
+  const labelOf = (serial: string) =>
+    deviceOptions.find((o) => o.value === serial)?.label ?? serial;
+
   return (
     <Modal
       title={t(isEdit ? "handoverForm.edit" : "handoverForm.create")}
@@ -272,33 +303,78 @@ function HandoverModal({
         <div className="form-grid">
           <label className="form-field form-field-full">
             <span>
-              {t("handoverForm.device")}<span className="req">*</span>
+              {t(isEdit ? "handoverForm.device" : "handoverForm.devices")}
+              <span className="req">*</span>
             </span>
             <Select
+              // The picker IS the list: removing a tag removes the line, so there
+              // is no separate "add row" button to keep in sync with it. Editing
+              // stays single — one ledger row is one device.
+              mode={isEdit ? undefined : "multiple"}
               showSearch
               optionFilterProp="label"
-              value={serialNumber || undefined}
+              value={
+                isEdit
+                  ? lines[0]?.serial || undefined
+                  : lines.map((line) => line.serial)
+              }
               placeholder={devicePlaceholder}
               disabled={disabled}
-              onChange={handleDeviceChange}
+              onChange={handleDevicesChange}
               options={deviceOptions}
             />
           </label>
 
-          <label className="form-field">
-            <span>
-              {t("handoverForm.from")}<span className="req">*</span>
-            </span>
-            <Select
-              showSearch
-              optionFilterProp="label"
-              value={fromEmployeeCode || undefined}
-              placeholder={employeePlaceholder}
-              disabled={disabled}
-              onChange={setFromEmployeeCode}
-              options={userOptions}
-            />
-          </label>
+          {lines.length > 0 && (
+            <ul className="form-field-full handover-lines">
+              {lines.map((line) => {
+                const dev = devices.find((d) => d.serial_number === line.serial);
+                // What this line will do to this machine. Shown per line rather
+                // than in one summary because the answer differs between them: a
+                // device coming back to the store keeps `maintaining` if that is
+                // where it was, while its neighbour becomes `in_stock`.
+                const after = toEmployeeCode
+                  ? DEVICE_STATUS_META[
+                      deriveStatus(toEmployeeCode, dev?.status ?? null)
+                    ]
+                  : null;
+                return (
+                  <li key={line.serial} className="handover-line">
+                    <span className="handover-line-device" title={line.serial}>
+                      {labelOf(line.serial)}
+                    </span>
+                    <label className="handover-line-from">
+                      <span>{t("handoverForm.from")}</span>
+                      <Select
+                        showSearch
+                        optionFilterProp="label"
+                        value={line.from || undefined}
+                        placeholder={employeePlaceholder}
+                        disabled={disabled}
+                        onChange={(value) => setLineFrom(line.serial, value)}
+                        options={userOptions}
+                      />
+                    </label>
+                    {after && (
+                      <span className={`pill ${after.pill}`}>{after.label}</span>
+                    )}
+                    {!isEdit && (
+                      <Button
+                        type="text"
+                        size="small"
+                        disabled={submitting}
+                        aria-label={t("handoverForm.removeDevice")}
+                        title={t("handoverForm.removeDevice")}
+                        onClick={() => removeLine(line.serial)}
+                      >
+                        ✕
+                      </Button>
+                    )}
+                  </li>
+                );
+              })}
+            </ul>
+          )}
 
           <label className="form-field">
             <span>
@@ -329,7 +405,7 @@ function HandoverModal({
             />
           </label>
 
-          <label className="form-field">
+          <label className="form-field form-field-full">
             <span>{t("handoverForm.reason")}</span>
             <AutoComplete
               style={{ width: "100%" }}
@@ -347,18 +423,19 @@ function HandoverModal({
           </label>
         </div>
 
-        {/* What this handover will do to the device. Spelled out because the
-            receiver alone does not tell the whole story: a return sends the
-            machine to IT-STORE and back into stock. */}
-        {serialNumber && toEmployeeCode && (
+        {/* Who ends up holding the machines. The per-device effect is on each line
+            above; this is the one thing the whole record shares — and it is worth
+            spelling out, because a return sends the machines to IT-STORE rather
+            than to the person who signed for them. */}
+        {lines.length > 0 && toEmployeeCode && (
           <p className="info-callout">
             {t("handover.effect", {
-              serial: serialNumber,
+              n: lines.length,
+              serial: lines[0].serial,
               owner:
                 toEmployeeCode === GHOST_USER_CODE
                   ? t("owner.store")
                   : toEmployeeCode,
-              status: deriveStatus(toEmployeeCode, selectedDevice?.status ?? null),
             })}
           </p>
         )}
