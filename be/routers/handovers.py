@@ -9,6 +9,7 @@ from ..db import get_pool
 from ..documents import handover_document
 from ..search import rank
 from .. import handover_import, llm
+from ..models.device import DeviceUpdate
 from ..models.handover import HandoverCreate, HandoverOut, HandoverUpdate
 from ..models.page import Page, Ranked
 from ..repositories import handover as repo
@@ -49,6 +50,60 @@ def _reject_meaningless(from_user_id: str | None, to_user_id: str | None) -> Non
 async def create_handover(handover: HandoverCreate, pool=Depends(get_pool)):
     _reject_meaningless(handover.from_user_id, handover.to_user_id)
     return await repo.create(pool, handover)
+
+
+@router.post("/batch", response_model=list[HandoverOut], status_code=201)
+async def create_handover_batch(
+    handovers: list[HandoverCreate] = Body(...), pool=Depends(get_pool)
+):
+    """One handover record, however many devices it moves — written atomically.
+
+    A minutes sheet now routinely hands over two or three machines at once, and
+    the form used to have no way to say so: it created one handover, then made a
+    SECOND call to move the device, so a failure in between left the history
+    written and the machine still standing in the previous owner's name. Three
+    devices meant six calls and six ways to end up half-recorded.
+
+    So the whole record lands in one transaction — the same shape
+    `/imports/handover/apply` has always used for a spreadsheet. Every device
+    moves, or none does.
+
+    Unlike the plain `POST /handovers`, this endpoint also MOVES each device to
+    its recipient. That is the difference between recording a row and recording a
+    handover; the single POST stays a bare resource write.
+
+    Declared before /{handover_id} for the same reason its DELETE twin is.
+    """
+    if not handovers:
+        raise HTTPException(422, "Biên bản phải có ít nhất một thiết bị.")
+    for item in handovers:
+        _reject_meaningless(item.from_user_id, item.to_user_id)
+
+    created: list[dict] = []
+    async with pool.acquire() as conn:
+        async with conn.transaction():
+            for item in handovers:
+                # DuplicateError / ForeignKeyError from the repo reach the 409
+                # handler in main.py, and leaving this block is what rolls the
+                # whole record back — an unknown serial on line 3 must not commit
+                # lines 1 and 2.
+                created.append(await repo.create(conn, item))
+
+                # Read per item rather than once up front: a record may move the
+                # same device twice (see handover_import), and the second row has
+                # to see what the first one did.
+                device = await device_repo.get(conn, item.device_id)
+                owner = item.to_user_id
+                await device_repo.update(conn, item.device_id, DeviceUpdate(
+                    user_id=owner,
+                    # The same owner→status rule the form shows while you type
+                    # (deriveStatus in fe/src/lib/format.ts). Shared with the
+                    # importer so the two cannot drift.
+                    status=handover_import.status_after(
+                        owner, (device or {}).get("status")
+                    ),
+                ))
+    return created
 
 
 @router.delete("/batch", status_code=204)

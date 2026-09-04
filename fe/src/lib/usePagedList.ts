@@ -3,7 +3,7 @@ import type { TablePaginationConfig } from "antd";
 import type { SorterResult } from "antd/es/table/interface";
 import { toast } from "react-toastify";
 import type { Paged, PageParams } from "../api/paging";
-import { useLoading } from "../hook/LoadingContext";
+import { useLoading } from "../hook/useLoading";
 import { useT } from "../i18n/useT";
 
 export type SortOrder = "asc" | "desc";
@@ -60,8 +60,14 @@ export function usePagedList<T>(
 
   const { startLoading, endLoading } = useLoading();
   const { t } = useT();
+  // Kept in a ref rather than in `load`'s dependencies so a caller may pass an
+  // inline fetcher without re-creating `load` — and therefore re-fetching — on
+  // every render. Written in an effect, never during render, and declared ABOVE
+  // the effect that calls `load` so the ref is current before any load runs.
   const fetcherRef = useRef(fetcher);
-  fetcherRef.current = fetcher;
+  useEffect(() => {
+    fetcherRef.current = fetcher;
+  }, [fetcher]);
 
   // Monotonic request id: a response is only applied if no newer request started.
   const seq = useRef(0);

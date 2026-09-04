@@ -1,6 +1,6 @@
 // Language state for the whole app: English by default, or the shuffle.
 //
-// Mirrors hook/LoadingContext — the app's one existing pattern for cross-cutting
+// Mirrors hook/LoadingProvider — the app's one existing pattern for cross-cutting
 // state. The toggle lives in sessionStorage via useSessionState so a refresh does
 // not quietly drop you back to English mid-demo.
 import { useMemo } from "react";

@@ -118,6 +118,14 @@ export function ImportDevicesModal({
   useEffect(() => {
     // The file identity is the trigger; `parseFile` is recreated every render, so
     // depending on it would re-parse on every keystroke elsewhere.
+    //
+    // parseFile clears the previous rows and error before it starts reading, which
+    // is a synchronous setState the compiler rule flags. It is the right thing
+    // here: a new file arriving from outside this component IS the event, and the
+    // stale result of the last one must not stay on screen while the new one
+    // parses. There is nothing to derive it from — the parse output is not a
+    // function of the props.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     if (file) parseFile(file);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [file]);

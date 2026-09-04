@@ -3,7 +3,7 @@ import "./App.css";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Dropdown } from "antd";
 import loadingGif from "./assets/loading.gif";
-import { useLoading } from "./hook/LoadingContext";
+import { useLoading } from "./hook/useLoading";
 import { SparkleBackground } from "./components/SparkleBackground";
 import {
   installSparkleClicks,

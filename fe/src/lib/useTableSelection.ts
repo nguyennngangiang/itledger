@@ -1,4 +1,6 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
+
+const NOTHING: string[] = [];
 
 /**
  * Row selection for a table screen: the keys, the object <Table> wants, and one
@@ -14,19 +16,29 @@ import { useEffect, useState } from "react";
  *
  *     const sel = useTableSelection(list.trashed, statusFilter);
  *     <Table rowSelection={sel.rowSelection} … />
+ *
+ * The reset is DERIVED, not performed. Keys are stored alongside the filters they
+ * were picked under, and a selection made under different filters simply does not
+ * count. Clearing them in an effect instead left one render where the filter had
+ * already changed and the old selection was still live — which is the exact
+ * window this hook exists to close.
  */
 export function useTableSelection(...resetOn: unknown[]) {
-  const [selectedKeys, setSelectedKeys] = useState<string[]>([]);
+  const token = JSON.stringify(resetOn);
+  const [picked, setPicked] = useState<{ token: string; keys: string[] }>({
+    token,
+    keys: NOTHING,
+  });
 
-  useEffect(() => {
-    setSelectedKeys([]);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, resetOn);
+  // A shared constant rather than a fresh `[]`, so a stale selection does not
+  // hand <Table> a new array identity on every render.
+  const selectedKeys = picked.token === token ? picked.keys : NOTHING;
+  const setSelectedKeys = (keys: string[]) => setPicked({ token, keys });
 
   return {
     selectedKeys,
     setSelectedKeys,
-    clear: () => setSelectedKeys([]),
+    clear: () => setSelectedKeys(NOTHING),
     rowSelection: {
       selectedRowKeys: selectedKeys,
       onChange: (keys: React.Key[]) => setSelectedKeys(keys as string[]),

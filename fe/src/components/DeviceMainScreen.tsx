@@ -330,6 +330,7 @@ export const DeviceMainScreen = ({
 
       {editTarget && (
         <CreateDeviceModal
+          key={editTarget.serial_number}
           isEdit
           device={editTarget}
           onClose={() => {

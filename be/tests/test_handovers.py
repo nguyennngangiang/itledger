@@ -208,3 +208,98 @@ async def test_page_total_is_the_unpaged_count(client, seed):
     body = (await client.get("/handovers/page", params={"limit": 2})).json()
     assert len(body["rows"]) == 2
     assert body["total"] == 3
+
+
+# --- one record, several devices -------------------------------------------
+#
+# A minutes sheet now routinely hands over two or three machines at once. The form
+# used to write one handover and then make a SECOND call to move the device, so a
+# failure in between left the history written and the machine on its old owner —
+# and three devices meant six calls. POST /handovers/batch does the whole record in
+# one transaction, and the form goes through it even for a single device.
+
+BATCH = [
+    {
+        "handover_id": "HO-B1", "handover_date": "2026-07-11",
+        "device_id": "SN-QUAN-1", "from_user_id": "VPHN216",
+        "to_user_id": "VPHN228", "reason": "Resignation",
+    },
+    {
+        "handover_id": "HO-B2", "handover_date": "2026-07-11",
+        "device_id": "SN-GIANG-1", "from_user_id": "VPHN258",
+        "to_user_id": "VPHN228", "reason": "Resignation",
+    },
+    {
+        "handover_id": "HO-B3", "handover_date": "2026-07-11",
+        "device_id": "SN-STORE-1", "from_user_id": GHOST,
+        "to_user_id": "VPHN228", "reason": "Resignation",
+    },
+]
+
+
+async def _owner(client, serial: str) -> tuple[str, str]:
+    device = (await client.get(f"/devices/{serial}")).json()
+    return device["user_id"], device["status"]
+
+
+async def test_batch_records_the_whole_record(client, seed):
+    r = await client.post("/handovers/batch", json=BATCH)
+    assert r.status_code == 201, r.text
+    assert [h["handover_id"] for h in r.json()] == ["HO-B1", "HO-B2", "HO-B3"]
+
+    rows = (await client.get("/handovers")).json()
+    assert len(rows) == 3
+
+    # The point of the endpoint: every machine actually moved. SN-STORE-1 was
+    # in_stock with the ghost and is now someone's, so its status follows too.
+    for item in BATCH:
+        assert await _owner(client, item["device_id"]) == ("VPHN228", "active")
+
+
+async def test_batch_of_one_behaves_like_the_single_path(client, seed):
+    """The form posts here even for one device, so this shape has to keep working."""
+    r = await client.post("/handovers/batch", json=BATCH[:1])
+    assert r.status_code == 201, r.text
+    assert len(r.json()) == 1
+    assert await _owner(client, "SN-QUAN-1") == ("VPHN228", "active")
+
+
+async def test_batch_returning_to_the_store_puts_devices_back_in_stock(client, seed):
+    r = await client.post("/handovers/batch", json=[{
+        "handover_id": "HO-R1", "handover_date": "2026-07-11",
+        "device_id": "SN-QUAN-1", "from_user_id": "VPHN216",
+        "to_user_id": GHOST, "reason": "Return to IT",
+    }])
+    assert r.status_code == 201, r.text
+    assert await _owner(client, "SN-QUAN-1") == (GHOST, "in_stock")
+
+
+async def test_batch_is_all_or_nothing_on_an_unknown_device(client, seed):
+    """The line that matters: row 3 fails, so rows 1 and 2 must not commit.
+
+    Without the transaction the first two handovers would be written and their two
+    machines moved, leaving half a record in the ledger and no sign of it.
+    """
+    broken = BATCH[:2] + [{**BATCH[2], "device_id": "NO-SUCH"}]
+    r = await client.post("/handovers/batch", json=broken)
+    assert r.status_code == 409, r.text
+
+    assert (await client.get("/handovers")).json() == []
+    assert await _owner(client, "SN-QUAN-1") == ("VPHN216", "active")
+    assert await _owner(client, "SN-GIANG-1") == ("VPHN258", "active")
+
+
+async def test_batch_refuses_a_line_that_hands_a_device_to_its_own_holder(client, seed):
+    broken = [BATCH[0], {**BATCH[1], "to_user_id": "VPHN258"}]  # already VPHN258's
+    r = await client.post("/handovers/batch", json=broken)
+    assert r.status_code == 422
+    assert "khác nhau" in r.json()["detail"]
+
+    assert (await client.get("/handovers")).json() == []
+    assert await _owner(client, "SN-QUAN-1") == ("VPHN216", "active")
+
+
+async def test_batch_refuses_an_empty_record(client, seed):
+    r = await client.post("/handovers/batch", json=[])
+    assert r.status_code == 422
+    assert "thiết bị" in r.json()["detail"]

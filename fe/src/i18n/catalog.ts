@@ -334,7 +334,11 @@ export const EN = {
   "search.maintenance": "Search repair records — filters as you type",
   "search.handover": "Search handovers — filters as you type",
   "search.employee": "Search code, name, department, position — filters as you type",
-  "handover.effect": "Once saved, {serial} will belong to {owner}, status {status}",
+  // A record can move two or three machines at once, so this says who ends up
+  // holding them; the resulting status is shown per device on the form's own
+  // list, because it differs between them.
+  "handover.effect": "Once saved, {n} devices will belong to {owner}",
+  "handover.effect.one": "Once saved, {serial} will belong to {owner}",
   "device.autoFixed": "auto-corrected from “{value}”",
   "device.undoFix": "undo",
   "employee.namePlaceholder": "e.g. Nguyễn Văn A",
@@ -552,20 +556,27 @@ export const EN = {
 
   "handoverForm.create": "Record Handover",
   "handoverForm.edit": "Edit Handover",
+  // Singular while editing — one ledger row is one device. The plural is the
+  // create form, where a record may hand over two or three at once.
   "handoverForm.device": "Device",
+  "handoverForm.devices": "Devices",
   "handoverForm.from": "From",
   "handoverForm.to": "To",
   "handoverForm.date": "Date",
   "handoverForm.reason": "Reason",
   "handoverForm.pickDevice": "Select a device",
+  "handoverForm.pickDevices": "Select one or more devices",
   "handoverForm.pickEmployee": "Select an employee",
+  "handoverForm.removeDevice": "Remove this device from the record",
   "handoverForm.loadingDevices": "Loading devices…",
   "handoverForm.loadingEmployees": "Loading employees…",
   "handoverForm.devicesFailed": "Could not load devices",
   "handoverForm.employeesFailed": "Could not load employees",
-  "handoverForm.samePerson": "From and to employee must be different",
-  "handoverForm.ownerNotUpdated":
-    "Handover saved, but the device's owner could not be updated. Change it on the Devices screen.",
+  "handoverForm.noDevice": "Pick at least one device",
+  // Names the device rather than saying "from and to must differ": with three
+  // machines on screen, the blanket message does not say which line is wrong.
+  "handoverForm.samePersonFor":
+    "{serial} is already held by the person receiving it",
   "handoverForm.loadFailed": "Failed to load form data",
   "handoverForm.failed": "Failed to submit handover",
 

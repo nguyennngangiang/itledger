@@ -166,9 +166,14 @@ export function ImportModal({
   };
 
   useEffect(() => {
-    if (incoming?.files.length) add(incoming.files);
     // The batch's timestamp is the trigger; `add` is recreated every render, and
     // the array is a fresh object each time even when nothing was dropped.
+    //
+    // `add` queues the dropped files, a synchronous setState the compiler rule
+    // flags. A drop onto the window (lib/useFileDrop.ts) is an outside event, not
+    // something this component can derive from its props.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    if (incoming?.files.length) add(incoming.files);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [incoming?.at]);
 

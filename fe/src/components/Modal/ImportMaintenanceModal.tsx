@@ -122,7 +122,9 @@ export function ImportMaintenanceModal({
   };
 
   useEffect(() => {
-    // See the note in ImportDevicesModal — the file identity is the trigger.
+    // See the note in ImportDevicesModal — the file identity is the trigger, and
+    // clearing the last file's rows before parsing the new one is the point.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     if (file) parseFile(file);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [file]);

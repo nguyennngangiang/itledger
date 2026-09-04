@@ -10,6 +10,11 @@ export function CountUp({ value, duration = 1400 }: { value: number; duration?: 
     const el = ref.current;
     if (!el) return;
     const obj = { n: prev.current };
+    // The span renders empty and this effect owns its text from here on. Putting
+    // the starting number in the JSX instead meant reading a ref during render,
+    // and there is nothing to read it for: anime overwrites the text on its first
+    // frame anyway.
+    el.textContent = String(obj.n);
     anime({
       targets: obj,
       n: value,
@@ -24,5 +29,5 @@ export function CountUp({ value, duration = 1400 }: { value: number; duration?: 
     return () => anime.remove(obj);
   }, [value, duration]);
 
-  return <span ref={ref}>{prev.current}</span>;
+  return <span ref={ref} />;
 }

@@ -42,6 +42,17 @@ export function createHandover(handover: HandoverCreate) {
   })
 }
 
+// One handover record covering however many devices, written in a single
+// transaction that also moves each device to its recipient. The form uses this
+// even for one device, so there is exactly one create path and no window where
+// the history is saved but the machine still shows its previous owner.
+export function createHandoverBatch(handovers: HandoverCreate[]) {
+  return request<Handover[]>('/handovers/batch', {
+    method: 'POST',
+    body: JSON.stringify(handovers),
+  })
+}
+
 export function updateHandover(handoverId: string, patch: Partial<Handover>) {
   return request<Handover>(`/handovers/${encodeURIComponent(handoverId)}`, {
     method: 'PATCH',
