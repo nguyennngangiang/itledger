@@ -4,6 +4,7 @@ import { formatDate } from "../lib/format";
 import { DEVICE_STATUS_META } from "../types";
 import { WrenchIcon } from "./icons";
 import { VerticalStepper, type StepperNode } from "./VerticalStepper";
+import { useT } from "../i18n/useT";
 
 // cost_vnd is a Postgres DECIMAL, serialized as a numeric string — coerce
 // before formatting/summing or arithmetic silently does string concatenation.
@@ -26,6 +27,7 @@ export function RepairStoryPanel({
   history: Maintenance[];
   onClose: () => void;
 }) {
+  const { t } = useT();
   const statusMeta = DEVICE_STATUS_META[device?.status ?? "in_stock"];
   const otherRepairs = history.filter(
     (m) => m.maintenance_id !== record.maintenance_id,
@@ -35,20 +37,20 @@ export function RepairStoryPanel({
   const nodes: StepperNode[] = [
     {
       id: "problem",
-      title: "Problem",
-      subtitle: record.reason || "No problem description recorded.",
+      title: t("story.problem"),
+      subtitle: record.reason || t("story.problem.empty"),
       tone: "danger",
     },
     {
       id: "solution",
-      title: "Solution",
-      subtitle: record.solution || "No solution recorded yet.",
+      title: t("story.solution"),
+      subtitle: record.solution || t("story.solution.empty"),
       tone: "accent",
     },
     {
       id: "result",
-      title: "Result",
-      subtitle: record.result || "No result recorded yet.",
+      title: t("story.result"),
+      subtitle: record.result || t("story.result.empty"),
       tone: "success",
     },
   ];
@@ -61,10 +63,13 @@ export function RepairStoryPanel({
         </span>
         <div style={{ flex: 1, minWidth: 0 }}>
           <div className="detail-panel-head-title">
-            {device?.name ?? record.device_id ?? "Unknown device"}
+            {device?.name ?? record.device_id ?? t("detail.unknownDevice")}
           </div>
           <div className="detail-panel-head-sub">
-            {device?.serial_number ?? "—"} · {owner.name}
+            {t("story.sub", {
+              serial: device?.serial_number ?? "—",
+              owner: owner.name,
+            })}
           </div>
         </div>
         <span
@@ -73,7 +78,11 @@ export function RepairStoryPanel({
         >
           {statusMeta.label}
         </span>
-        <button className="detail-panel-close" onClick={onClose} aria-label="Close">
+        <button
+          className="detail-panel-close"
+          onClick={onClose}
+          aria-label={t("detail.close")}
+        >
           ×
         </button>
       </div>
@@ -83,11 +92,11 @@ export function RepairStoryPanel({
 
         <div className="detail-stat-row">
           <div className="detail-stat">
-            <div className="detail-stat-label">Cost</div>
+            <div className="detail-stat-label">{t("story.cost")}</div>
             <div className="detail-stat-value">{vnd(record.cost_vnd)}</div>
           </div>
           <div className="detail-stat">
-            <div className="detail-stat-label">Part</div>
+            <div className="detail-stat-label">{t("story.part")}</div>
             <div className="detail-stat-value">{record.part || "—"}</div>
           </div>
         </div>
@@ -99,22 +108,24 @@ export function RepairStoryPanel({
         <div className="detail-history-list">
           <div className="detail-history-head">
             <span className="panel-title" style={{ fontSize: 13 }}>
-              History on this device
+              {t("story.history")}
             </span>
             <span className="panel-count">
-              {history.length} repair{history.length === 1 ? "" : "s"} ·{" "}
-              {vnd(totalCost)}
+              {t("story.historyCount", {
+                n: history.length,
+                cost: vnd(totalCost),
+              })}
             </span>
           </div>
           <div
             className="detail-history-item current"
           >
-            <span>This record · {record.part || "—"}</span>
+            <span>{t("story.thisRecord", { part: record.part || "—" })}</span>
             <span>{formatDate(record.maintenance_date)}</span>
           </div>
           {otherRepairs.map((m) => (
             <div className="detail-history-item" key={m.maintenance_id}>
-              <span>{m.part || "Repair"}</span>
+              <span>{m.part || t("story.repair")}</span>
               <span>{formatDate(m.maintenance_date)}</span>
             </div>
           ))}

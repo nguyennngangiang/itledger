@@ -3,6 +3,7 @@ import { formatDate, resolveOwner, type UserMap } from "../lib/format";
 import { DEVICE_STATUS_META } from "../types";
 import { HandoverIcon } from "./icons";
 import { VerticalStepper, type StepperNode } from "./VerticalStepper";
+import { useT } from "../i18n/useT";
 
 function initials(name: string): string {
   const parts = name.trim().split(/\s+/).filter(Boolean);
@@ -25,6 +26,7 @@ export function DeviceJourneyPanel({
   users: UserMap;
   onClose: () => void;
 }) {
+  const { t } = useT();
   const statusMeta = DEVICE_STATUS_META[device?.status ?? "in_stock"];
   const sorted = [...handovers].sort((a, b) =>
     (a.handover_date ?? "").localeCompare(b.handover_date ?? ""),
@@ -34,7 +36,7 @@ export function DeviceJourneyPanel({
   if (device?.buy_date) {
     nodes.push({
       id: "origin",
-      title: "Registered to stock",
+      title: t("journey.registered"),
       meta: formatDate(device.buy_date),
       avatarLabel: "IT",
       tone: "default",
@@ -65,10 +67,13 @@ export function DeviceJourneyPanel({
         </span>
         <div style={{ flex: 1, minWidth: 0 }}>
           <div className="detail-panel-head-title">
-            {device?.name ?? "Unknown device"}
+            {device?.name ?? t("detail.unknownDevice")}
           </div>
           <div className="detail-panel-head-sub">
-            {device?.serial_number ?? "—"} · bought {formatDate(device?.buy_date)}
+            {t("detail.bought", {
+              serial: device?.serial_number ?? "—",
+              date: formatDate(device?.buy_date),
+            })}
           </div>
         </div>
         <span
@@ -77,7 +82,11 @@ export function DeviceJourneyPanel({
         >
           {statusMeta.label}
         </span>
-        <button className="detail-panel-close" onClick={onClose} aria-label="Close">
+        <button
+          className="detail-panel-close"
+          onClick={onClose}
+          aria-label={t("detail.close")}
+        >
           ×
         </button>
       </div>
@@ -85,20 +94,21 @@ export function DeviceJourneyPanel({
       <div className="detail-panel-body">
         <div className="detail-history-head">
           <span className="panel-title" style={{ fontSize: 13 }}>
-            Device journey
+            {t("journey.title")}
           </span>
-          <span className="panel-count">{handovers.length} handovers</span>
+          <span className="panel-count">
+            {t("journey.count", { n: handovers.length })}
+          </span>
         </div>
         {nodes.length > 0 ? (
           <VerticalStepper nodes={nodes} variant="rail" />
         ) : (
           <p className="detail-panel-empty" style={{ padding: "24px 0" }}>
-            No handover history for this device yet.
+            {t("journey.empty")}
           </p>
         )}
         <p className="info-callout">
-          This chain is the device's story over cells — every keeper, when, and
-          why, straight from the handover ledger.
+          {t("journey.note")}
         </p>
       </div>
     </div>

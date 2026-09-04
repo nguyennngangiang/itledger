@@ -1,7 +1,11 @@
-// Helpers to turn a picked File into the base64 attachment shape the assistant
-// API expects ({ name, mime, data }). Images are downscaled first to keep the
-// upload light — the server still OCRs the reduced version fine.
-import type { Attachment } from "../api/assistant";
+// Helpers to turn a picked File into the base64 attachment shape the import API
+// expects ({ name, mime, data }). Images are downscaled first to keep the upload
+// light — the server still reads the reduced version fine.
+
+// An uploaded file as the backend wants it: raw base64 bytes plus name and mime.
+// It used to live in api/assistant.ts, which went with the Ask AI feature; the
+// importer is the only caller left.
+export type Attachment = { name: string; mime: string; data: string }
 
 function toBase64(blob: Blob): Promise<string> {
   return new Promise((resolve, reject) => {

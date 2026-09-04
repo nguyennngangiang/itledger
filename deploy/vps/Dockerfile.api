@@ -1,0 +1,22 @@
+# API image for the Linux VPS.
+#
+# The Windows/LAN deployment does not use this: be/docker-compose.yml runs a bare
+# python:3.12-slim, bind-mounts the whole repo and pip-installs on every start.
+# That is a development shape — it re-downloads wheels on each container start,
+# and it means the running code is whatever happens to be on the D: drive. On a
+# VPS the code should be baked in and the container should start in a second.
+#
+# Build context is the REPO ROOT, not be/ — see docker-compose.vps.yml.
+FROM python:3.12-slim
+
+WORKDIR /app
+
+# Copied on its own so a code change does not invalidate the wheel layer.
+COPY be/requirements.txt /app/be/requirements.txt
+RUN pip install --no-cache-dir -r /app/be/requirements.txt
+
+COPY be/ /app/be/
+
+# No --reload: watching a source tree costs CPU and would restart the API under
+# users on any file touch. Deploying new code means rebuilding this image.
+CMD ["uvicorn", "be.main:app", "--host", "0.0.0.0", "--port", "8000"]

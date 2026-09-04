@@ -5,8 +5,39 @@ node_modules
 # One-off data / import scaffolding (see CLAUDE.md)
 REAL-DATA.xlsx
 import_data.json
+import_names_report.json
+workbook_sync_backup.json
 dist/
+
+# Safety dumps the fix_*/import_* scripts write before their first write. They
+# hold real employee names and codes. Listed one by one until two of them
+# (devices_before_owner_fix, users_before_status_seed) leaked past the list —
+# hence the glob. Anything named <table>_before_<what>.json is a snapshot.
+*_before_*.json
+
+# HR staff import (see be/import_employees.py). employee.dump is a pg_dump of
+# the yic_operation_staging HR database and carries personal data (emails,
+# phones, dates of birth) — it must never reach the repo.
+employee.dump
+employees_import.json
+users_before_employee_import.json
+# Safety dump taken before the from-scratch rebuild (be/import_real.py).
+db_before_rebuild.dump
 
 # Host AI service: local venv + downloaded model cache
 ai/.venv/
 ai/.models/
+
+# LAN deployment (see deploy/README.md): vendored portable Python 3.12 and the
+# runtime logs written by the autostart task, Caddy and the embedder.
+.python312/
+deploy/*.log
+
+# Vendored Caddy binary (53 MB). Copied from D:\LLM\caddy\caddy.exe when the app
+# was split off that stack — see deploy/README.md. Not tracked; deploy/Caddyfile
+# and start-itledger.ps1 are what matter.
+deploy/caddy.exe
+
+# Database dumps taken for the VPS move (deploy/vps/dump-db.sh). They hold real
+# employee names and codes, and are carried to the server out of band, never here.
+backups/

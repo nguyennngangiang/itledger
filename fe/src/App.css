@@ -50,11 +50,32 @@
   border-bottom: 1px solid rgba(255, 255, 255, 0.6);
 }
 
+/* The brand is a button: it is how you get to the Dashboard now that Dashboard
+   is not a nav tab. It has to read as pressable, not as decoration. */
 .topbar-brand {
   display: flex;
   align-items: center;
   gap: 10px;
   flex-shrink: 0;
+  padding: 4px 10px 4px 4px;
+  border: 1px solid transparent;
+  border-radius: 11px;
+  background: transparent;
+  font-family: inherit;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+.topbar-brand:hover {
+  border-color: var(--accent-border);
+  background: var(--accent-bg);
+}
+.topbar-brand.active {
+  border-color: var(--accent-border);
+  background: var(--accent-bg);
+}
+.topbar-brand:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
 }
 .topbar-logo {
   display: grid;
@@ -112,12 +133,8 @@
   gap: 16px;
   flex-shrink: 0;
 }
-.quick-add {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-.quick-add-btn {
+/* Header buttons: the Add menu and the Import split control. */
+.topbar-btn {
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -133,22 +150,106 @@
   cursor: pointer;
   transition: all 0.15s ease;
 }
-.quick-add-btn:hover {
+.topbar-btn:hover {
   border-color: var(--accent);
   background: var(--accent);
   color: #fff;
 }
-.topbar-avatar {
+.topbar-btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* Import = [ Import ][▾]: one action, one menu, joined so they read as one
+   control. The caret is its own button on purpose — a hover-only menu is
+   unreachable by keyboard and on touch. */
+.topbar-split {
+  display: inline-flex;
+  align-items: center;
+}
+.topbar-split .topbar-btn--main {
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+}
+.topbar-split .topbar-btn--caret {
+  padding: 0 7px;
+  border-left: none;
+  border-top-left-radius: 0;
+  border-bottom-left-radius: 0;
+}
+
+/* Language shuffle. Same square icon-button shape as the bell; the `.on` state
+   follows the `.trash-toggle.open` convention for a two-state header control. */
+.topbar-globe {
   width: 36px;
   height: 36px;
   border-radius: 10px;
   display: grid;
   place-items: center;
-  font-weight: 700;
-  font-size: 13px;
   color: var(--accent);
   background: var(--accent-bg);
   border: 1px solid var(--accent-border);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+.topbar-globe:hover,
+.topbar-globe.on {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: #fff;
+}
+.topbar-globe.on svg {
+  animation: globe-spin 9s linear infinite;
+}
+@keyframes globe-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+.topbar-globe:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.topbar-bell {
+  position: relative;
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  display: grid;
+  place-items: center;
+  color: var(--accent);
+  background: var(--accent-bg);
+  border: 1px solid var(--accent-border);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+.topbar-bell:hover,
+.topbar-bell.active {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: #fff;
+}
+.topbar-bell:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+/* Count of open import issues. Sits on the bell rather than in the nav, so the
+   backlog is visible from every screen. */
+.topbar-bell-badge {
+  position: absolute;
+  top: -5px;
+  right: -5px;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 9px;
+  background: var(--danger, #f87171);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 18px;
+  text-align: center;
 }
 
 /* ---------- Page sub-header ---------- */
@@ -184,8 +285,7 @@
   flex-direction: column;
 }
 .app-content--flex .screen-toolbar,
-.app-content--flex .status-chips,
-.app-content--flex .ai-banner {
+.app-content--flex .status-chips {
   flex-shrink: 0;
 }
 .app-content--flex .panel {
@@ -249,7 +349,7 @@
   .topnav-item span {
     display: none;
   }
-  .quick-add-btn span {
+  .topbar-btn span {
     display: none;
   }
 }
@@ -473,6 +573,14 @@
 }
 .info-trigger:hover {
   color: var(--accent);
+}
+/* This popover trigger is tabbable, so keyboard users need to see where they
+   are — nothing else in the row draws a ring for them. */
+.info-trigger:focus-visible {
+  color: var(--accent);
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 4px;
 }
 .detail-bubble {
   display: grid;
@@ -1187,7 +1295,10 @@
 }
 .form-grid {
   display: grid;
-  grid-template-columns: repeat(2, 1fr);
+  /* minmax(0, 1fr), not 1fr: a bare 1fr is minmax(auto, 1fr), so the column
+     cannot shrink below its content and a long Select label ("Nguyễn Thị Hương
+     Thảo — SALES 2 - VUORI") pushes the whole field outside the modal. */
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 16px 18px;
 }
 .form-grid .form-field-full {
@@ -1197,6 +1308,7 @@
   display: flex;
   flex-direction: column;
   gap: 6px;
+  min-width: 0; /* same reason as above — let the control ellipsis instead of overflow */
 }
 .form-field > span {
   font-size: 13px;
@@ -1316,7 +1428,7 @@
    ============================================================ */
 
 /* Glowing quick-add buttons */
-.quick-add-btn:hover {
+.topbar-btn:hover {
   box-shadow: 0 6px 18px -4px rgba(124, 116, 232, 0.7);
   transform: translateY(-1px);
 }
@@ -1365,7 +1477,7 @@
 .app-shell .ant-btn-primary,
 .app-shell .ant-btn-default,
 .topnav-item,
-.quick-add-btn,
+.topbar-btn,
 .status-chip,
 .trash-toggle {
   position: relative; /* anchor the ring (primary already relative) */
@@ -1374,7 +1486,7 @@
 .app-shell .ant-btn-primary::before,
 .app-shell .ant-btn-default::before,
 .topnav-item::before,
-.quick-add-btn::before,
+.topbar-btn::before,
 .status-chip::before,
 .trash-toggle::before {
   content: "";
@@ -1403,7 +1515,7 @@
 .app-shell .ant-btn-primary:hover::before,
 .app-shell .ant-btn-default:hover::before,
 .topnav-item:hover::before,
-.quick-add-btn:hover::before,
+.topbar-btn:hover::before,
 .status-chip:hover::before,
 .trash-toggle:hover::before {
   opacity: 1;
@@ -1453,7 +1565,7 @@
   .app-shell .ant-btn-primary::before,
   .app-shell .ant-btn-default::before,
   .topnav-item::before,
-  .quick-add-btn::before,
+  .topbar-btn::before,
   .status-chip::before,
   .trash-toggle::before {
     animation: none;
@@ -1539,9 +1651,882 @@
   overflow: auto;
 }
 
+/* ============================================================
+   Import handover minutes — wizard, conflicts, notification badge
+   ============================================================ */
+.import-busy {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 13px;
+  color: var(--text-muted, #6b6785);
+}
+/* The read step's progress. The phase name leads and the count sits to its right,
+   because "23 of 40 rows" is the reassuring half and it should be where the eye
+   lands last, not buried under a percentage. No percentage is printed at all: the
+   row count IS the number, and two numbers competing would make the honest one
+   look like decoration. */
+.import-progress {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface-muted);
+}
+.import-progress-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 13px;
+}
+.import-progress-label {
+  font-weight: 600;
+  color: var(--text);
+}
+.import-progress-detail {
+  /* Tabular figures so "9 of 15" → "10 of 15" doesn't shuffle the line sideways
+     once a second. */
+  font-variant-numeric: tabular-nums;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+.import-progress .ant-progress {
+  margin: 0;
+  line-height: 1;
+}
+/* The shimmer on an unknown-length phase is motion carrying meaning, so it needs a
+   still fallback rather than removal: the bar keeps its filled width and simply
+   stops moving. */
 @media (prefers-reduced-motion: reduce) {
+  .import-progress .ant-progress-bg::before,
+  .import-progress .ant-progress-status-active .ant-progress-bg::before {
+    animation: none;
+  }
+}
+/* The single drop zone: the front door for every kind of import, so it is the one
+   thing on this dialog allowed to be big. The dashed frame is the drop target (it
+   must be a div to take the drag events); the button inside is what you click. */
+.import-zone {
+  width: 100%;
+  border: 1.5px dashed var(--accent-border);
+  border-radius: 16px;
+  background:
+    radial-gradient(120% 100% at 50% 0%, rgba(139, 131, 240, 0.1), transparent 70%),
+    var(--accent-bg);
+  transition:
+    border-color 0.15s ease,
+    transform 0.15s ease,
+    box-shadow 0.15s ease;
+}
+.import-zone > button {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 24px 20px 20px;
+  border: 0;
+  border-radius: 16px;
+  background: none;
+  color: var(--accent);
+  font-family: inherit;
+  font-size: 14px;
+  text-align: center;
+  cursor: pointer;
+}
+/* The one aurora moment on this dialog — the gesture it is asking for. */
+.import-zone-glyph {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 52px;
+  height: 52px;
+  border-radius: 999px;
+  background: linear-gradient(135deg, #8b83f0, #7c74e8 45%, #a855f7);
+  color: #fff;
+  box-shadow: 0 8px 18px -6px rgba(124, 116, 232, 0.55);
+}
+/* What it accepts, as chips rather than a sentence — a scan of four words beats a
+   line of prose nobody reads twice. */
+.import-zone-formats {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  justify-content: center;
+  margin-top: 2px;
+}
+.import-format {
+  padding: 1px 8px;
+  border: 1px solid var(--accent-border);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.7);
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+.import-zone:hover,
+.import-zone.is-dragging {
+  border-color: var(--accent);
+}
+.import-zone.is-dragging {
+  transform: translateY(-2px);
+  border-style: solid;
+  box-shadow: 0 14px 30px -12px rgba(124, 116, 232, 0.5);
+}
+.import-zone > button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.import-kind-picks {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 8px;
+}
+
+/* ---------------------------------------------------------- dropped-file cards
+   A card per file, not a row per file. A file in a bulk run has a story — what we
+   think it is, why, how far along, what it did — and that never fit on one line;
+   squeezing it there is what made this screen read as a list of filenames. */
+.import-files {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.import-file {
+  display: flex;
+  align-items: flex-start;
+  gap: 11px;
+  padding: 12px 12px 12px 13px;
+  border: 1px solid rgba(255, 255, 255, 0.7);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.86);
+  box-shadow: var(--shadow-sm);
+  transition:
+    box-shadow 0.15s ease,
+    border-color 0.15s ease;
+}
+.import-file:hover {
+  box-shadow: var(--shadow-md);
+}
+.import-file.is-error {
+  border-color: var(--danger-bg);
+  background: rgba(254, 226, 226, 0.4);
+}
+.import-file.is-done {
+  background: rgba(255, 255, 255, 0.6);
+  box-shadow: none;
+}
+/* The kind glyph doubles as the status light: the resource's own icon while it is
+   being sorted, a tick or a cross once it is settled. One place to look. */
+.import-file-glyph {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 30px;
+  height: 30px;
+  border-radius: 9px;
+  border: 1px solid var(--border);
+  background: var(--surface-muted);
+  color: var(--text-faint);
+}
+.import-file-glyph.is-known {
+  border-color: var(--accent-border);
+  background: var(--accent-bg);
+  color: var(--accent);
+}
+.import-file-glyph.is-ok {
+  border-color: transparent;
+  background: var(--success-bg);
+  color: var(--success);
+}
+.import-file-glyph.is-bad {
+  border-color: transparent;
+  background: var(--danger-bg);
+  color: var(--danger);
+}
+.import-file-body {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.import-file-top {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+}
+.import-file-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--text);
+}
+.import-file-top .ant-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  margin: 0;
+  font-size: 11px;
+}
+.import-file-meta {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  flex-wrap: wrap;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+/* The reason detection is allowed to be confident: it says why, in the user's own
+   file's words. Truncated because a long reason must not push the card taller than
+   the three lines this layout is built for. */
+.import-file-why {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 34ch;
+}
+.import-file-progress {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin-top: 1px;
+}
+.import-file-progress .ant-progress {
+  flex: 1 1 auto;
+  margin: 0;
+  line-height: 1;
+}
+.import-file-phase {
+  flex: 0 0 auto;
+  font-size: 11.5px;
+  color: var(--accent);
+  font-weight: 500;
+}
+.import-file-pick {
+  margin-top: 2px;
+}
+.import-file-pick .ant-segmented {
+  font-size: 12px;
+}
+.import-file-x {
+  flex: 0 0 auto;
+  color: var(--text-faint);
+}
+
+/* The bulk-run result. One number leads and the files explain it — twelve equal
+   lines is a log, not an answer. */
+.import-tally {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 14px 16px;
+  border: 1px solid var(--accent-border);
+  border-radius: 14px;
+  background: var(--accent-bg);
+}
+.import-tally-n {
+  font-size: 30px;
+  font-weight: 800;
+  line-height: 1;
+  background: linear-gradient(135deg, #8b83f0, #7c74e8 45%, #a855f7);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+.import-tally-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 13px;
+}
+.import-tally-sub {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+/* ------------------------------------------------------- drag-anywhere target
+   Dragging a file onto the app is the obvious gesture, and it used to do nothing
+   (worse: the browser navigated away to the file). This is the answer to "where
+   would it even go?" — shown only while the import dialog is closed, since that
+   dialog has a target of its own. */
+.dropveil {
+  position: fixed;
+  inset: 0;
+  z-index: 2000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(43, 39, 64, 0.32);
+  backdrop-filter: blur(6px);
+  animation: dropveil-in 0.16s ease-out;
+}
+.dropveil-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 34px 46px;
+  border: 2px dashed rgba(255, 255, 255, 0.85);
+  border-radius: 20px;
+  background: rgba(255, 255, 255, 0.94);
+  box-shadow: 0 30px 60px -20px rgba(43, 39, 64, 0.45);
+  text-align: center;
+  font-size: 15px;
+  color: var(--text);
+}
+.dropveil-glyph {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 58px;
+  height: 58px;
+  border-radius: 999px;
+  background: linear-gradient(135deg, #8b83f0, #7c74e8 45%, #a855f7);
+  color: #fff;
+  box-shadow: 0 10px 22px -8px rgba(124, 116, 232, 0.6);
+}
+.dropveil-hint {
+  font-size: 12.5px;
+  color: var(--text-muted);
+}
+@keyframes dropveil-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .dropveil {
+    animation: none;
+  }
+  .import-zone.is-dragging {
+    transform: none;
+  }
+}
+
+/* Step bar across the top of a review, plus "File 2/5" when part of a bulk run. */
+.import-steps {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  font-size: 12px;
+}
+.import-steps .ant-steps {
+  flex: 1 1 auto;
+}
+
+/* Who signed this record — all of them, in form order, IT badged. Rendering only
+   the parties that disagreed with the ledger meant a three-party record showed
+   two people and quietly dropped the third. */
+.import-cast {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+.import-who {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 4px 11px 4px 5px;
+  border: 1px solid var(--border, #ece9f5);
+  border-radius: 999px;
+  background: var(--surface-muted, #f7f5fd);
+  font-size: 12.5px;
+}
+.import-who-av {
+  width: 21px;
+  height: 21px;
+  border-radius: 999px;
+  display: grid;
+  place-items: center;
+  background: var(--accent-bg);
+  color: var(--accent);
+  font-size: 10px;
+  font-weight: 700;
+}
+.import-who.is-it {
+  background: var(--accent-bg);
+  border-color: var(--accent-border);
+}
+/* The aurora gradient earns its place here: it marks the one party the whole
+   direction logic pivots on. */
+.import-who.is-it .import-who-av {
+  background: linear-gradient(120deg, var(--accent), #d946ef);
+  color: #fff;
+}
+.import-who-name {
+  font-weight: 600;
+}
+.import-who-code {
+  font-size: 11px;
+  color: var(--text-muted, #6b6785);
+}
+.import-who-new {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #16a34a;
+  background: #dcfce7;
+  border-radius: 999px;
+  padding: 1px 6px;
+}
+
+/* One number leads. The other three counts are consequences of pressing Import,
+   not questions, and four equal tiles flattened the only one that was a question. */
+.import-verdict {
+  display: flex;
+  align-items: center;
+  gap: 13px;
+  padding: 12px 14px;
+  border: 1px solid #fcd34d;
+  border-radius: 12px;
+  background: #fef3c7;
+}
+.import-verdict-n {
+  font-size: 26px;
+  font-weight: 800;
+  line-height: 1;
+  color: #b45309;
+  font-variant-numeric: tabular-nums;
+}
+.import-verdict-text {
+  display: flex;
+  flex-direction: column;
+  font-size: 13.5px;
+}
+.import-verdict-sub {
+  font-size: 12px;
+  color: var(--text-muted, #6b6785);
+}
+.import-verdict.is-clear {
+  border-color: #86efac;
+  background: #dcfce7;
+}
+.import-verdict.is-clear .import-verdict-n {
+  color: #15803d;
+}
+
+/* Folded sections: the lines that are fine, and the dropped-cell warnings. */
+.import-fold,
+.import-warn-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--accent);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+.import-fold:hover,
+.import-warn-toggle:hover {
+  text-decoration: underline;
+}
+
+.import-plan-actions {
+  align-items: center;
+}
+.import-plan-go {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 12px;
+}
+
+/* "đã tự sửa từ …" — a correction is only acceptable if it says so and can be
+   undone. Quiet, but never hidden. */
+.field-corrected {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 4px;
+  font-size: 11.5px;
+  color: var(--text-muted, #6b6785);
+}
+.field-undo {
+  border: none;
+  background: none;
+  padding: 0;
+  font: inherit;
+  color: var(--accent);
+  text-decoration: underline;
+  cursor: pointer;
+}
+.field-undo:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.import-warnings {
+  margin: 0;
+  padding-left: 18px;
+  font-size: 12px;
+}
+.import-read {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.import-read-head {
+  font-size: 13px;
+}
+.import-parties {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 10px;
+}
+.import-party {
+  padding: 10px 12px;
+  border: 1px solid var(--accent-border);
+  border-radius: 10px;
+  background: var(--accent-bg);
+  font-size: 13px;
+}
+.import-party-label {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-muted, #6b6785);
+}
+.import-items {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12.5px;
+}
+.import-items th,
+.import-items td {
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--accent-border);
+  text-align: left;
+  vertical-align: top;
+}
+.import-items th {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-muted, #6b6785);
+}
+
+/* One movement per row. Direction is the reason this screen exists, so it is drawn
+   rather than described — it used to be a line of muted 12px text sitting under
+   everything else, which is the bottom of the visual order for the top of the job. */
+.import-move {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 12px;
+  padding: 12px 13px;
+  border: 1px solid var(--border, #ece9f5);
+  border-radius: 12px;
+  background: var(--surface, #fff);
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04), 0 1px 3px rgba(15, 23, 42, 0.06);
+}
+/* Amber means "a human still has to look at this", the same language the verdict
+   block and the provenance badge speak. */
+.import-move.needs {
+  border-color: #fcd34d;
+  background: #fffdf6;
+}
+.import-move.is-skipped {
+  opacity: 0.55;
+}
+.import-move-no {
+  width: 24px;
+  height: 24px;
+  border-radius: 999px;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--border, #ece9f5);
+  background: var(--surface-muted, #f7f5fd);
+  font-size: 11.5px;
+  font-weight: 700;
+  color: var(--text-muted, #6b6785);
+  font-variant-numeric: tabular-nums;
+}
+.import-move-body {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  min-width: 0;
+}
+.import-move-top {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.import-move-name {
+  font-weight: 600;
+  font-size: 13.5px;
+}
+.import-move-sn {
+  font-size: 11.5px;
+  color: var(--text-muted, #6b6785);
+}
+.import-move-acts {
+  margin-left: auto;
+  display: flex;
+  gap: 2px;
+}
+.import-move-note {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  flex-wrap: wrap;
+  font-size: 11.5px;
+  color: var(--text-muted, #6b6785);
+}
+.import-chip-new {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--accent);
+  background: var(--accent-bg);
+  border: 1px solid var(--accent-border);
+  border-radius: 999px;
+  padding: 0 7px;
+}
+
+/* Why the row points the way it does — a badge, with the resolver's full sentence
+   on hover. Fifteen rows of Vietnamese prose is not a review screen. */
+.import-prov {
+  display: inline-flex;
+  align-items: center;
+  font-size: 11px;
+  padding: 2px 8px;
+  border: 1px solid var(--accent-border);
+  border-radius: 999px;
+  background: var(--accent-bg);
+  color: var(--accent);
+  white-space: nowrap;
+  cursor: default;
+}
+.import-prov.is-ask {
+  border-color: #fcd34d;
+  background: #fef3c7;
+  color: #b45309;
+}
+
+/* giver → receiver, as a directed edge. */
+.import-edge {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  gap: 10px;
+  align-items: center;
+}
+.import-node {
+  min-width: 0;
+}
+.import-node-label {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--text-faint, #a5a1bb);
+  margin-bottom: 2px;
+}
+.import-node-name {
+  font-weight: 600;
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+.import-node-sub {
+  font-size: 11px;
+  color: var(--text-muted, #6b6785);
+}
+/* Editable ends (three parties or more) read as the name, not as a form control,
+   until you reach for them. */
+.import-node-pick.ant-select {
+  margin-left: -8px;
+  min-width: 130px;
+  max-width: 100%;
+}
+.import-node-pick .ant-select-selector {
+  font-weight: 600;
+  font-size: 13px;
+}
+.import-node-pick .ant-select-selection-item {
+  color: var(--accent);
+}
+.import-node.is-empty .import-node-pick .ant-select-selection-placeholder {
+  color: #b45309;
+}
+
+.import-arrow {
+  display: grid;
+  place-items: center;
+  gap: 3px;
+  padding: 0 2px;
+}
+.import-arrow-cap {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: var(--text-muted, #6b6785);
+  white-space: nowrap;
+}
+.import-arrow-bar {
+  position: relative;
+  width: 58px;
+  max-width: 100%;
+  height: 2px;
+  border-radius: 2px;
+  background: linear-gradient(90deg, var(--accent), #d946ef);
+}
+.import-arrow-bar::after {
+  content: "";
+  position: absolute;
+  right: -1px;
+  top: 50%;
+  width: 7px;
+  height: 7px;
+  border-top: 2px solid #d946ef;
+  border-right: 2px solid #d946ef;
+  transform: translateY(-50%) rotate(45deg);
+}
+/* Colour carries the flow, so the row needs no separate flow tag competing for
+   attention: violet leaves IT, amber comes back to it. */
+.import-arrow.is-return .import-arrow-bar {
+  background: #d97706;
+}
+.import-arrow.is-return .import-arrow-bar::after {
+  border-color: #d97706;
+}
+.import-arrow.is-return .import-arrow-cap {
+  color: #b45309;
+}
+
+/* A question, shaped like a question. */
+.import-ask {
+  padding: 11px 13px;
+  border: 1px solid #fcd34d;
+  border-radius: 12px;
+  background: #fffdf6;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.import-ask-who {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  flex-wrap: wrap;
+  font-size: 13px;
+}
+/* Scoped: the same rows are reused by the Notifications dialog, which is opened
+   deliberately and can afford the roomier default layout. */
+.import-ask .conflict-row,
+.import-move .conflict-row {
+  gap: 4px;
+}
+.import-ask .conflict-rows .ant-radio-wrapper,
+.import-move .conflict-rows .ant-radio-wrapper {
+  font-size: 12.5px;
+}
+
+@media (max-width: 560px) {
+  /* The arrow cannot survive three columns on a phone; stack and let the labels
+     carry the direction instead. */
+  .import-edge {
+    grid-template-columns: 1fr;
+    gap: 6px;
+  }
+  .import-arrow {
+    grid-auto-flow: column;
+    justify-content: start;
+    gap: 8px;
+  }
+  .import-arrow-bar {
+    width: 40px;
+  }
+}
+/* A disagreement, settled where it is read. This used to be a one-line row with a
+   button that stacked a modal on the modal; the radio rows now sit inside it. */
+.import-issue {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-top: 6px;
+  border-top: 1px dashed var(--accent-border);
+  font-size: 12px;
+}
+.import-issue.is-settled {
+  opacity: 0.7;
+}
+.import-issue-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.import-issue-text {
+  flex: 1 1 320px;
+}
+.import-issue-confirm {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.conflict-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.conflict-row {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--accent-border);
+}
+.conflict-field {
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-muted, #6b6785);
+}
+.conflict-manual {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  font-size: 12px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  /* The header menus slide in by default; that is motion nobody asked for. */
+  .ant-dropdown,
+  .ant-dropdown-menu {
+    animation: none !important;
+    transition: none !important;
+  }
   .topnav-indicator {
     transition: none;
+  }
+  /* The globe keeps spinning while the shuffle is on — that is exactly the kind
+     of idle motion reduced-motion asks to be spared. */
+  .topbar-globe.on svg {
+    animation: none;
   }
 }
 
@@ -1659,372 +2644,4 @@
     max-width: calc(100vw - 20px) !important;
     margin: 0 auto;
   }
-}
-
-/* ============================================================
-   Smart (semantic) search — banner + relevance meter
-   ============================================================ */
-.ai-banner {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  margin-bottom: 14px;
-  padding: 10px 16px;
-  border: 1px solid var(--accent-border);
-  border-radius: var(--radius);
-  background: linear-gradient(120deg, var(--accent-bg), rgba(217, 70, 239, 0.08));
-  color: var(--text);
-  font-size: 13px;
-}
-.ai-banner-text {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  color: var(--accent);
-}
-.ai-banner-text b {
-  color: var(--text);
-}
-
-.relevance {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-}
-.relevance-track {
-  position: relative;
-  width: 74px;
-  height: 7px;
-  border-radius: 999px;
-  background: var(--surface-muted);
-  overflow: hidden;
-}
-.relevance-fill {
-  position: absolute;
-  inset: 0 auto 0 0;
-  border-radius: 999px;
-  background: linear-gradient(90deg, #8b83f0, #d946ef);
-  transition: width 0.4s ease;
-}
-.relevance-num {
-  font-size: 12px;
-  font-weight: 700;
-  color: var(--accent);
-  min-width: 34px;
-}
-
-/* "Why this matched?" trigger — sits beside the relevance bar on smart results.
-   Distinct magnifier-with-check icon; reveals the evidence popover on hover. */
-.prove-trigger {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  color: var(--text-faint);
-  cursor: help;
-  transition: color 0.15s ease, transform 0.15s ease;
-}
-.prove-trigger:hover {
-  color: var(--accent);
-  transform: scale(1.15);
-}
-.prove-overlay .ant-popover-inner {
-  max-width: 340px;
-}
-.prove-pop {
-  max-width: 320px;
-}
-.prove-pop-head {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 10px;
-  margin-bottom: 8px;
-}
-.prove-pop-score {
-  font-size: 13px;
-  font-weight: 800;
-  color: var(--accent);
-}
-.prove-pop-note {
-  font-size: 11px;
-  font-weight: 500;
-  color: var(--text-muted);
-}
-.prove-pop-text {
-  margin: 0;
-  font-size: 13px;
-  line-height: 1.55;
-  color: var(--text);
-}
-.prove-hl {
-  background: linear-gradient(90deg, #8b83f0, #d946ef);
-  color: #fff;
-  padding: 0 4px;
-  border-radius: 5px;
-  font-weight: 600;
-}
-.prove-pop-foot {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  margin-top: 9px;
-  padding-top: 8px;
-  border-top: 1px solid var(--border);
-  font-size: 11.5px;
-  font-weight: 500;
-  color: var(--accent);
-}
-
-/* LLM explanation line inside the proof card */
-.prove-pop-why {
-  display: flex;
-  align-items: flex-start;
-  gap: 6px;
-  margin: 4px 0 8px;
-  padding: 8px 10px;
-  border-radius: 8px;
-  background: var(--accent-bg);
-  border: 1px solid var(--accent-border);
-  font-size: 12.5px;
-  line-height: 1.5;
-  color: var(--text);
-}
-.prove-pop-why svg {
-  flex: 0 0 auto;
-  margin-top: 1px;
-  color: var(--accent);
-}
-.prove-pop-dim {
-  color: var(--text-muted);
-  font-style: italic;
-}
-.prove-pop-reason {
-  margin: 0 0 8px;
-  font-size: 12px;
-  line-height: 1.5;
-  color: var(--text-muted);
-}
-.prove-pop-reason b {
-  color: var(--accent);
-}
-
-/* "Mark as correct" — the training signal */
-.prove-mark {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  margin-top: 10px;
-  width: 100%;
-  justify-content: center;
-  padding: 7px 12px;
-  border: 1px solid var(--accent-border);
-  border-radius: 8px;
-  background: var(--accent-bg);
-  color: var(--accent);
-  font-family: inherit;
-  font-size: 12.5px;
-  font-weight: 600;
-  cursor: pointer;
-  transition: all 0.15s ease;
-}
-.prove-mark:hover:not(:disabled) {
-  background: var(--accent);
-  color: #fff;
-  border-color: var(--accent);
-}
-.prove-mark.done {
-  background: #ecfdf5;
-  border-color: #6ee7b7;
-  color: #059669;
-  cursor: default;
-}
-
-/* ---------- Ask-AI assistant panel (right-docked Drawer) ---------- */
-.assistant-drawer .ant-drawer-content {
-  background: rgba(255, 255, 255, 0.92);
-  backdrop-filter: blur(14px) saturate(1.2);
-  -webkit-backdrop-filter: blur(14px) saturate(1.2);
-}
-.assistant-drawer .ant-drawer-body {
-  display: flex;
-  flex-direction: column;
-  min-height: 0;
-}
-.assistant {
-  display: flex;
-  flex-direction: column;
-  height: 100%;
-  min-height: 0;
-}
-.assistant-stats-strip {
-  flex-shrink: 0;
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 8px;
-  padding: 0 2px 12px;
-  margin-bottom: 6px;
-  border-bottom: 1px solid var(--border);
-}
-.assistant-stat-pill {
-  padding: 3px 10px;
-  border-radius: 999px;
-  font-size: 11.5px;
-  font-weight: 600;
-  color: var(--accent);
-  background: var(--accent-bg);
-  border: 1px solid var(--accent-border);
-}
-.assistant-stat-caption {
-  font-size: 11px;
-  color: var(--text-faint);
-}
-.assistant-trace {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 6px;
-  margin: 5px 0 0 2px;
-}
-.assistant-trace-chip {
-  font-family: ui-monospace, Menlo, monospace;
-  font-size: 10.5px;
-  padding: 2px 7px;
-  border-radius: 5px;
-  color: var(--accent);
-  background: var(--accent-bg);
-  border: 1px solid var(--accent-border);
-}
-.assistant-trace-meta {
-  font-size: 11px;
-  color: var(--text-faint);
-}
-.assistant-bar {
-  flex-shrink: 0;
-  display: flex;
-  justify-content: flex-end;
-  padding: 0 2px 6px;
-}
-.assistant-log {
-  flex: 1;
-  overflow-y: auto;
-  padding: 4px 2px 8px;
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-.assistant-empty {
-  margin: auto;
-  max-width: 380px;
-  text-align: center;
-  color: var(--text-muted);
-}
-.assistant-empty svg {
-  color: var(--accent);
-}
-.assistant-empty p {
-  margin: 8px 0 14px;
-  font-size: 13px;
-  line-height: 1.55;
-}
-.assistant-suggestions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  justify-content: center;
-}
-.assistant-chip {
-  padding: 6px 12px;
-  border: 1px solid var(--accent-border);
-  border-radius: 999px;
-  background: var(--accent-bg);
-  color: var(--accent);
-  font-family: inherit;
-  font-size: 12px;
-  font-weight: 500;
-  cursor: pointer;
-  transition: all 0.15s ease;
-}
-.assistant-chip:hover {
-  background: var(--accent);
-  color: #fff;
-}
-.assistant-msg {
-  display: flex;
-}
-.assistant-msg.user {
-  justify-content: flex-end;
-}
-.assistant-msg.ai {
-  flex-direction: column;
-  align-items: flex-start;
-}
-.assistant-bubble {
-  max-width: 82%;
-  padding: 9px 13px;
-  border-radius: 12px;
-  font-size: 13px;
-  line-height: 1.55;
-  white-space: pre-wrap;
-  word-break: break-word;
-}
-.assistant-msg.user .assistant-bubble {
-  background: var(--accent);
-  color: #fff;
-  border-bottom-right-radius: 4px;
-}
-.assistant-msg.ai .assistant-bubble {
-  background: var(--surface-muted);
-  color: var(--text);
-  border: 1px solid var(--border);
-  border-bottom-left-radius: 4px;
-}
-.assistant-thinking {
-  color: var(--text-muted);
-  font-style: italic;
-}
-.assistant-files {
-  flex-shrink: 0;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  padding: 8px 2px 0;
-}
-.assistant-file-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  max-width: 220px;
-  padding: 3px 6px 3px 10px;
-  font-size: 12px;
-  color: var(--accent);
-  background: var(--accent-bg);
-  border: 1px solid var(--accent-border);
-  border-radius: 999px;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.assistant-file-x {
-  border: none;
-  background: transparent;
-  color: var(--accent);
-  cursor: pointer;
-  font-size: 15px;
-  line-height: 1;
-  padding: 0 2px;
-}
-.assistant-file-x:hover {
-  color: var(--text);
-}
-.assistant-input {
-  display: flex;
-  gap: 8px;
-  align-items: flex-end;
-  padding-top: 10px;
-  border-top: 1px solid var(--border);
-}
-.assistant-input .ant-input {
-  flex: 1;
 }

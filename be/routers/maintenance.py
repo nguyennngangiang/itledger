@@ -4,44 +4,33 @@ Parse the request, call the repository, translate domain errors / missing rows
 to HTTP status codes. No SQL here — that lives in repositories/maintenance.py.
 """
 from fastapi import APIRouter, Body, Depends, HTTPException
-from pydantic import BaseModel
 
 from ..db import get_pool
 from ..documents import maintenance_document
 from ..search import rank
 from .. import llm
 from ..models.maintenance import MaintenanceCreate, MaintenanceOut, MaintenanceUpdate
+from ..models.page import ImportResult, Page, Ranked
 from ..repositories import maintenance as repo
 from ..repositories import device as device_repo
 from ..repositories import feedback as feedback_repo
 from ..repositories import user as user_repo
-from ..repositories.errors import DuplicateError, ForeignKeyError
 
 router = APIRouter(prefix="/maintenance", tags=["maintenance"])
 
-
-class MaintenancePage(BaseModel):
-    rows: list[MaintenanceOut]
-    total: int
+# DuplicateError / ForeignKeyError are mapped to 409 centrally in main.py.
+MaintenancePage = Page[MaintenanceOut]
 
 
-class MaintenanceRanked(MaintenanceOut):
+class MaintenanceRanked(MaintenanceOut, Ranked):
     """A maintenance record plus its semantic-similarity score (0–1), the exact
     sentence the embedder ranked it on (`document`), and the LLM reranker's
     one-line `reason` when it ran."""
-    score: float
-    document: str
-    reason: str | None = None
 
 
 @router.post("", response_model=MaintenanceOut, status_code=201)
 async def create_maintenance(maintenance: MaintenanceCreate, pool=Depends(get_pool)):
-    try:
-        return await repo.create(pool, maintenance)
-    except DuplicateError as e:
-        raise HTTPException(409, str(e))
-    except ForeignKeyError as e:
-        raise HTTPException(409, str(e))
+    return await repo.create(pool, maintenance)
 
 
 @router.delete("/batch", status_code=204)
@@ -84,9 +73,29 @@ async def page_maintenance(
     return {"rows": rows, "total": total}
 
 
+@router.post("/import", response_model=ImportResult)
+async def import_maintenance(
+    records: list[MaintenanceCreate], pool=Depends(get_pool)
+):
+    """Bulk-insert parsed repair rows. Re-importing the same file is idempotent —
+    see repo.import_maintenance for why the dedup key is (device, date, part) and
+    not the id. Rows naming an unknown serial are skipped, not rejected, so one bad
+    line cannot fail the whole sheet. Declared before /{maintenance_id}."""
+    return await repo.import_maintenance(pool, records)
+
+
 @router.get("/search", response_model=list[MaintenanceOut])
 async def search_maintenance(q: str, pool=Depends(get_pool)):
     return await repo.search(pool, q)
+
+
+@router.get("/suggestions", response_model=dict[str, list[str]])
+async def maintenance_suggestions(pool=Depends(get_pool)):
+    """Values already used, per column — feeds the repair form's autocompletes,
+    so it suggests the phrasing the team actually writes. One response for every
+    suggestable column. Declared before /{maintenance_id} so "suggestions" isn't
+    read as an id."""
+    return await repo.suggestions(pool)
 
 
 @router.get("/semantic-search", response_model=list[MaintenanceRanked])
@@ -150,10 +159,7 @@ async def update_maintenance(
     maintenance: MaintenanceUpdate,
     pool=Depends(get_pool),
 ):
-    try:
-        updated = await repo.update(pool, maintenance_id, maintenance)
-    except ForeignKeyError as e:
-        raise HTTPException(409, str(e))
+    updated = await repo.update(pool, maintenance_id, maintenance)
     if updated is None:
         raise HTTPException(404, f"Maintenance not found: {maintenance_id}")
     return updated

@@ -1,5 +1,12 @@
 """Thin OpenAI-compatible LLM client for the internal-network model.
 
+MOSTLY DORMANT. The model server this talks to — the D:\\LLM stack on this host —
+was retired, so `settings.ai_enabled` is off and the callers are guarded: the Ask
+AI router is not mounted, `rerank_results` returns its input untouched, and the
+import reader never reaches `read_handover_minutes`. Nothing here was deleted,
+because the guards are one flag and the stack could come back; but nothing here
+runs today either. Check `settings.ai_enabled` before adding a new caller.
+
 Talks to `settings.llm_base_url` (e.g. http://192.168.3.252:8443/v1) using the
 Chat Completions API with a Bearer key from be/.env. This is the ONLY place that
 calls the LLM; routers use the helpers here.
@@ -11,12 +18,20 @@ Nothing here writes back to or trains the shared model.
 """
 import json
 import time
+from collections.abc import AsyncIterator
 from typing import NamedTuple
 
 import httpx
 from fastapi import HTTPException
 
 from .config import settings
+
+
+def _headers() -> dict[str, str]:
+    headers = {"Content-Type": "application/json"}
+    if settings.llm_api_key:
+        headers["Authorization"] = f"Bearer {settings.llm_api_key}"
+    return headers
 
 
 async def _chat(
@@ -40,17 +55,94 @@ async def _chat(
     if want_json:
         # Supported by most OpenAI-compatible servers; harmless if ignored.
         body["response_format"] = {"type": "json_object"}
-    headers = {"Content-Type": "application/json"}
-    if settings.llm_api_key:
-        headers["Authorization"] = f"Bearer {settings.llm_api_key}"
 
     async with httpx.AsyncClient(timeout=timeout) as client:
         resp = await client.post(
-            f"{settings.llm_base_url}/chat/completions", json=body, headers=headers
+            f"{settings.llm_base_url}/chat/completions", json=body, headers=_headers()
         )
         resp.raise_for_status()
         data = resp.json()
     return data["choices"][0]["message"]["content"]
+
+
+async def _chat_stream(
+    system: str,
+    user: str,
+    *,
+    want_json: bool = False,
+    temperature: float = 0.2,
+    timeout: float = 180,
+) -> AsyncIterator[str]:
+    """The same completion, yielded piece by piece as the model writes it.
+
+    Streaming exists here for the PROGRESS, not the tokens: the caller cannot
+    otherwise tell "the model is still loading" from "the model is answering", and
+    those are 44 seconds and 6 seconds of the same silence on this hardware. The
+    first yielded piece is the moment the weights are resident and generation has
+    started.
+    """
+    body: dict = {
+        "model": settings.llm_model,
+        "messages": [
+            {"role": "system", "content": system},
+            {"role": "user", "content": user},
+        ],
+        "temperature": temperature,
+        "stream": True,
+    }
+    if want_json:
+        body["response_format"] = {"type": "json_object"}
+
+    async with httpx.AsyncClient(timeout=timeout) as client:
+        async with client.stream(
+            "POST", f"{settings.llm_base_url}/chat/completions",
+            json=body, headers=_headers(),
+        ) as resp:
+            resp.raise_for_status()
+            async for line in resp.aiter_lines():
+                if not line.startswith("data: "):
+                    continue
+                payload = line[6:].strip()
+                if payload == "[DONE]":
+                    break
+                try:
+                    delta = json.loads(payload)["choices"][0].get("delta") or {}
+                except (json.JSONDecodeError, KeyError, IndexError):
+                    continue  # a keepalive or a shape we don't know — not fatal
+                piece = delta.get("content")
+                if piece:
+                    yield piece
+
+
+async def warm() -> bool:
+    """Make the model resident, so the next real request doesn't pay for it.
+
+    Ollama unloads after `OLLAMA_KEEP_ALIVE` (10m on the deployment host), and
+    loading llama3.1:8b costs **~44 seconds** — measured as time-to-first-token on
+    a record that then generates in six. Any import made more than ten minutes
+    after the last one paid that in full, before a single field was read.
+
+    So the importer fires this the moment its dialog opens, and by the time a human
+    has picked a file the weights are usually in VRAM. One token is requested
+    because loading is the point and generating is not. Never raises: a failed
+    warm-up is a slow import, not a broken one.
+    """
+    body = {
+        "model": settings.llm_model,
+        "messages": [{"role": "user", "content": "hi"}],
+        "max_tokens": 1,
+        "temperature": 0.0,
+        "stream": False,
+    }
+    try:
+        async with httpx.AsyncClient(timeout=180) as client:
+            resp = await client.post(
+                f"{settings.llm_base_url}/chat/completions",
+                json=body, headers=_headers(),
+            )
+            return resp.is_success
+    except httpx.HTTPError:
+        return False
 
 
 async def chat(system: str, user: str, *, temperature: float = 0.3, timeout: float = 240) -> str:
@@ -180,6 +272,124 @@ async def explain(query: str, document: str) -> str:
         raise HTTPException(503, f"LLM explain unavailable: {e}")
 
 
+HANDOVER_READER_SYSTEM = """\
+You read ONE Vietnamese/English IT handover record ("BIÊN BẢN BÀN GIAO / HANDOVER
+MINUTES") that has been flattened to text, and return it as JSON.
+
+The record is a FORM, not a table. Labels sit in one cell and their value in a
+cell to the right, e.g. `B10 "Trịnh Thế Hưng"` is the value of `A10 "Bên A/ Party A:"`.
+Labels you will meet: `Địa điểm/ Place`, `Bên A/ Party A`, `Bên B/ Party B`,
+`Bên C/ Party C` and further letters, `Mã NV/ Code`, `Bộ phận/ Dept.`,
+`Chức vụ/ Position`. Below `Nội dung bàn giao/ Contents` there IS a small table
+whose header row contains `SERIAL`; every row under it with a number in the `No.`
+column is one handed-over item.
+
+Return EXACTLY this shape:
+{"handover_date":"YYYY-MM-DD","place":"...",
+ "parties":[{"label":"A","name":"","code":"","dept":"","position":""}],
+ "items":[{"no":1,"item":"","quantity":1,"detail":"","serial":"","note":"",
+           "device":{"type":"","brand":"","cpu":"","ram":"","storage":"","name":""}}]}
+
+Rules:
+- COPY values verbatim from the text. Never invent, translate, correct spelling,
+  or fill a blank with something plausible. Use null for anything not present.
+- `parties`: ONE object per `Bên …/ Party …` row that is actually in the text, in
+  the order they appear, with `label` set to that row's own letter. Two is the
+  usual number; three or more is normal and every one of them must be returned.
+  Never stop at B, and never add a party the text does not have.
+- `handover_date`: use the ISO date in square brackets after a date cell if there
+  is one (e.g. `D5 "Tuesday, July 21, 2026" [2026-07-21]` → "2026-07-21").
+- One object per `No.` row — no more, no fewer. A record with a single item is
+  normal and complete; do not invent a second row.
+- `device` splits the `Chi tiết/ Detail` text into parts, each part still a
+  substring of the text: "HP Laptop core i3 ram 8gb SSD 256gb" → type "Laptop",
+  brand "HP", cpu "core i3", ram "8gb", storage "SSD 256gb". Omit what isn't there.
+- Do NOT decide who gave and who received, and do NOT output any direction,
+  from/to, or flow field. Bên A is not necessarily the giver. That is decided
+  elsewhere from the ledger's own history.
+- Output only the JSON object. No prose, no markdown fence."""
+
+
+async def read_handover_minutes(sheet_text: str) -> dict:
+    """Read one flattened handover record into structured fields.
+
+    Returns {} on any failure (unreachable model, non-JSON reply) — the caller
+    turns that into a clear 503, because unlike rerank there is no useful
+    fallback: if the file can't be read there is nothing to import.
+
+    The result is NOT trusted: every string it returns is checked back against
+    the source text by the caller (routers/imports._verify_against_source) before
+    anything reaches the database.
+    """
+    if not (sheet_text or "").strip():
+        return {}
+    try:
+        raw = await _chat(
+            HANDOVER_READER_SYSTEM,
+            f"Handover record:\n{sheet_text}",
+            want_json=True,
+            temperature=0.0,
+            timeout=180,
+        )
+        parsed = json.loads(raw)
+    except (httpx.HTTPError, json.JSONDecodeError, KeyError, TypeError):
+        return {}
+    return parsed if isinstance(parsed, dict) else {}
+
+
+# Phases a streamed read passes through, in order. Named here because the reader is
+# the only thing that knows what its own silence means.
+LOADING = "loading"   # request accepted, not one token back yet — weights loading
+READING = "reading"   # tokens arriving; `items` counts the rows finished so far
+DONE = "done"         # `parsed` carries the reading ({} if it could not be read)
+
+
+async def read_handover_minutes_stream(sheet_text: str) -> AsyncIterator[dict]:
+    """`read_handover_minutes`, reporting where it has got to.
+
+    Yields `{"phase": LOADING}`, then a `{"phase": READING, "items": n}` per item
+    finished, then exactly one `{"phase": DONE, "parsed": …}`. `parsed` is `{}` on
+    any failure, same as the non-streaming reader — the caller turns that into a
+    503, because a record that cannot be read has nothing to import.
+
+    Progress is counted by the `"serial"` keys the model has emitted, because that
+    is the one key every item carries and the count only ever goes up. The total to
+    divide by is NOT guessed here: `handover_sheet.count_item_rows` reads it off the
+    file's own table before any of this starts.
+    """
+    if not (sheet_text or "").strip():
+        yield {"phase": DONE, "parsed": {}}
+        return
+
+    yield {"phase": LOADING}
+    chunks: list[str] = []
+    items = 0
+    try:
+        async for piece in _chat_stream(
+            HANDOVER_READER_SYSTEM,
+            f"Handover record:\n{sheet_text}",
+            want_json=True,
+            temperature=0.0,
+            timeout=180,
+        ):
+            chunks.append(piece)
+            # Counted over the join, not the piece: `"serial"` arrives split across
+            # chunk boundaries as often as not.
+            seen = "".join(chunks).count('"serial"')
+            if seen > items:
+                items = seen
+                yield {"phase": READING, "items": items}
+    except httpx.HTTPError:
+        yield {"phase": DONE, "parsed": {}}
+        return
+
+    try:
+        parsed = json.loads("".join(chunks))
+    except (json.JSONDecodeError, TypeError):
+        parsed = None
+    yield {"phase": DONE, "parsed": parsed if isinstance(parsed, dict) else {}}
+
+
 async def rerank(
     query: str,
     candidates: list[dict],
@@ -233,8 +443,11 @@ async def rerank_results(
     """Reorder already-ranked `results` (row dicts, each with a `document`) using
     the LLM, attaching a one-line `reason`. `id_key` is the row's id field
     (serial_number / maintenance_id / handover_id). Falls back to the input order
-    if the LLM can't rerank, so search never hard-fails."""
-    if not results:
+    if the LLM can't rerank, so search never hard-fails — and with
+    `settings.ai_enabled` off, that fallback is the only path: returning the
+    embedder's order at once beats burning a 180s timeout to arrive at the same
+    answer."""
+    if not results or not settings.ai_enabled:
         return results
     candidates = [{"id": r[id_key], "text": r.get("document", "")} for r in results]
     order = await rerank(query, candidates, examples, top_k=len(results))

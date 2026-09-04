@@ -1,0 +1,59 @@
+# IT Ledger — LAN site block.
+#
+# NOT loaded on its own: deploy/Caddyfile is the config, and it imports this file.
+# The split is historical — this block used to be imported into the LLM stack's
+# Caddyfile at D:\LLM so that one caddy.exe served both :8443 and :10000. That
+# stack is retired and this app runs its own caddy.exe now, but keeping the site
+# block in its own file costs nothing and the two have different reasons to change.
+#
+# Forward slashes throughout — Caddy accepts them on Windows and they avoid
+# backslash escaping in the tokenizer.
+#
+# deploy/Caddyfile sets `admin off` globally, so `caddy reload` does NOT work:
+# applying a change here means stopping and restarting the caddy process.
+
+:10000 {
+	# Compresses proxied JSON as well as the static assets, so it sits outside the
+	# handle blocks below.
+	encode gzip zstd
+
+	# The two handlers below MUST both be `handle` blocks. Caddy sorts directives
+	# by its own default order, not by source order, and `try_files` sorts EARLIER
+	# than `handle` — so a bare `try_files` at site level rewrites /api/health to
+	# /index.html before handle_path can match it, and every API call silently
+	# returns the SPA. Wrapping both in `handle` makes them one mutually exclusive
+	# group evaluated top-to-bottom.
+
+	# The API container publishes to 127.0.0.1 only (WSL2 forwards published
+	# container ports to loopback, never to the LAN) — this proxy is what puts it
+	# on the office network. handle_path strips the /api prefix, so
+	# /api/devices/page reaches the backend as /devices/page and be/routers/ needs
+	# no change.
+	handle_path /api/* {
+		reverse_proxy 127.0.0.1:8000 {
+			transport http {
+				# Reading a handover record is the longest call the API makes, and
+				# it is plain-code parsing now rather than a model — seconds, not
+				# the minutes the retired LLM path needed.
+				read_timeout 120s
+			}
+		}
+	}
+
+	# Everything else is the built SPA. Same origin as /api above, so CORS never
+	# enters the picture.
+	handle {
+		root * "D:/itledger/fe/dist"
+		# react-router deep links (/maintenance, /handovers, ...) are not real
+		# files; fall back to index.html so a refresh on those URLs works.
+		try_files {path} /index.html
+		file_server
+	}
+
+	log {
+		output file "D:/itledger/deploy/access.log" {
+			roll_size 10MiB
+			roll_keep 5
+		}
+	}
+}

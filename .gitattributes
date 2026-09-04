@@ -1,0 +1,5 @@
+# Shell scripts must keep LF endings even on a Windows checkout. core.autocrlf is
+# true on the office server, so without this the deploy/vps/*.sh scripts arrive on
+# the VPS with `#!/usr/bin/env bash\r` and fail with a bad-interpreter error — and
+# they are exactly the files that get copied to a Linux host by hand.
+*.sh text eol=lf

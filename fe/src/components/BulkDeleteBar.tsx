@@ -2,6 +2,7 @@ import { useEffect, useRef } from "react";
 import { Button } from "antd";
 import anime from "animejs";
 import { TrashIcon } from "./icons";
+import { useT } from "../i18n/useT";
 
 /**
  * Selection action bar shared by every table screen. Shows how many rows are
@@ -19,6 +20,7 @@ export function BulkDeleteBar({
   onDelete: () => void;
   onClear: () => void;
 }) {
+  const { t } = useT();
   const ref = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -37,11 +39,11 @@ export function BulkDeleteBar({
   return (
     <div className="bulk-bar" ref={ref}>
       <span className="bulk-bar-count">
-        <b>{count}</b> selected
+        {t("bulk.selected", { n: count })}
       </span>
       <div className="bulk-bar-actions">
         <Button size="small" onClick={onClear}>
-          Clear
+          {t("bulk.clear")}
         </Button>
         <Button
           size="small"
@@ -50,7 +52,7 @@ export function BulkDeleteBar({
           icon={<TrashIcon size={15} />}
           onClick={onDelete}
         >
-          {trashed ? "Delete permanently" : "Delete selected"}
+          {t(trashed ? "bulk.deleteForever" : "bulk.delete")}
         </Button>
       </div>
     </div>

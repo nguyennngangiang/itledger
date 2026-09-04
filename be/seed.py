@@ -20,6 +20,7 @@ from decimal import Decimal
 import asyncpg
 
 from .config import settings
+from .constants import GHOST_CODE
 
 N_USERS = 25
 N_DEVICES = 100
@@ -33,10 +34,6 @@ TEAMS = [
     "ESG", "DMD", "PMD", "FMD", "PROJECT", "MKT", "HR", "ACC",
     "FIN", "ADMIN", "IT", "S&P", "QA/QC", "KRDESK", "OPD",
 ]
-
-# Single "ghost" account in the IT team that holds every ownerless device,
-# so a device always resolves to an owner name/team and "in stock" is meaningful.
-GHOST_CODE = "IT-STORE"
 
 SURNAMES = ["Nguyen", "Tran", "Le", "Pham", "Hoang", "Vu", "Dang",
             "Bui", "Do", "Ho", "Ngo", "Duong", "Ly", "Phan", "Vo"]
@@ -178,7 +175,7 @@ async def seed() -> None:
             await conn.execute(
                 "ALTER TABLE devices ADD COLUMN IF NOT EXISTS status VARCHAR(100)"
             )
-            for tbl in ("devices", "maintenance", "handovers"):
+            for tbl in ("devices", "maintenance", "handovers", "users"):
                 await conn.execute(
                     f"ALTER TABLE {tbl} ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMP"
                 )
@@ -228,12 +225,6 @@ async def seed() -> None:
                    SET status = CASE WHEN user_id = $1 THEN 'in_stock' ELSE 'active' END
                    WHERE status IS NULL""",
                 GHOST_CODE,
-            )
-            # Mirror current ownership into the user_devices join table.
-            await conn.executemany(
-                """INSERT INTO user_devices (user_id, device_id)
-                   VALUES ($1, $2) ON CONFLICT DO NOTHING""",
-                [(d["user_id"], d["serial_number"]) for d in devices if d["user_id"]],
             )
             await conn.executemany(
                 """INSERT INTO handovers (handover_id, handover_date, device_id,

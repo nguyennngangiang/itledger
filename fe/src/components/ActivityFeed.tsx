@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import { DeviceIcon, WrenchIcon, HandoverIcon } from "./icons";
 import { formatDate } from "../lib/format";
+import { useT } from "../i18n/useT";
 
 export type ActivityItem = {
   id: string;
@@ -20,15 +21,16 @@ const KIND_META: Record<ActivityItem["kind"], { Icon: typeof DeviceIcon; tone: s
  * (handover_date) — no synthetic activity-log data, since the schema has no
  * timestamp columns to source one from. */
 export function ActivityFeed({ items }: { items: ActivityItem[] }) {
+  const { t } = useT();
   return (
     <div className="panel">
       <div className="panel-head">
-        <span className="panel-title">Fleet pulse — latest movements</span>
-        <span className="panel-count">most recent</span>
+        <span className="panel-title">{t("feed.title")}</span>
+        <span className="panel-count">{t("feed.count")}</span>
       </div>
       <div className="activity-feed">
         {items.length === 0 ? (
-          <div className="dash-empty">No activity yet</div>
+          <div className="dash-empty">{t("feed.empty")}</div>
         ) : (
           items.map((item) => {
             const { Icon, tone } = KIND_META[item.kind];

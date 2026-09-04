@@ -2,15 +2,36 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+
+    <!-- First, because the Inter handshake is the long pole in first paint. -->
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
       href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap"
       rel="stylesheet"
     />
+
     <title>IT Ledger — Asset Management</title>
+    <meta
+      name="description"
+      content="Internal IT asset ledger — track company devices, owners, repair history and handovers in one place."
+    />
+    <!-- Aurora Indigo: the logo mark (DESIGN.md), and the icon tile's own
+         colour, so the browser chrome and the tab icon read as one object. -->
+    <meta name="theme-color" content="#4f46e5" />
+
+    <!-- The .ico is tagged 32x32 so SVG-capable browsers pick icon.svg and never
+         fetch it; the SVG is untagged and is therefore the "any size" answer.
+         icon-192/512 are declared in the manifest only — a <link rel="icon">
+         would make desktop Chrome pull 512px for a 16px tab. The SVG is at
+         /icon.svg, NOT /favicon.svg: that path holds the old icon in every
+         office browser, and Chrome will not re-fetch an icon whose URL has not
+         changed (its favicon store is keyed by URL, with a multi-week expiry). -->
+    <link rel="icon" href="/favicon.ico" sizes="32x32" />
+    <link rel="icon" href="/icon.svg" type="image/svg+xml" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <link rel="manifest" href="/site.webmanifest" />
   </head>
   <body>
     <div id="root"></div>

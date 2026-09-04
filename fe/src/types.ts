@@ -44,29 +44,21 @@ export const DEVICE_STATUS_ORDER: DeviceStatus[] = [
 // Fields accepted when creating a device (serial_number required, rest optional).
 export type DeviceCreate = Pick<Device, 'serial_number'> & Partial<Omit<Device, 'serial_number'>>
 
-// A device plus its semantic-search relevance score (0–1) and `document` — the
-// exact sentence the embedder ranked it on.
-export type DeviceRanked = Device & {
-  score: number
-  document: string
-  reason?: string | null
-}
+/** Employment status. Separate from the trash — see the note on User.status. */
+export type UserStatus = "active" | "retired"
 
 export type User = {
   employee_code: string
   name: string | null
   team: string | null
-  selected: boolean | false
+  // "active" | "retired". Employment status, NOT the trash — someone who has
+  // left keeps their row so their handover history reads and so the machines
+  // they never returned stay chaseable.
+  status?: UserStatus | null
 }
 
 export type UserCreate = Pick<User, 'employee_code'> & Partial<Omit<User, 'employee_code'>>
 export type UserCreateBatch = UserCreate[]
-
-export type Team = {
-  team_id: string
-  team_name: string | null
-  division: string | null
-}
 
 export type Maintenance = {
   maintenance_id: string
@@ -84,13 +76,6 @@ export type Maintenance = {
 export type MaintenanceCreate = Pick<Maintenance, 'maintenance_id'> &
   Partial<Omit<Maintenance, 'maintenance_id'>>
 
-// A maintenance record plus its semantic-search relevance score (0–1).
-export type MaintenanceRanked = Maintenance & {
-  score: number
-  document: string
-  reason?: string | null
-}
-
 export type Handover = {
   handover_id: string
   handover_date: string | null
@@ -103,27 +88,7 @@ export type Handover = {
 export type HandoverCreate = Pick<Handover, 'handover_id'> &
   Partial<Omit<Handover, 'handover_id'>>
 
-// A handover record plus its semantic-search relevance score (0–1).
-export type HandoverRanked = Handover & {
-  score: number
-  document: string
-  reason?: string | null
-}
-
-export const teamsOptions = [
-    { team_id: "ESG", team_name: "ESG" },
-    { team_id: "DMD", team_name: "DMD" },
-    { team_id: "PMD", team_name: "PMD" },
-    { team_id: "FMD", team_name: "FMD" },
-    { team_id: "PROJECT", team_name: "PROJECT" },
-    { team_id: "MKT", team_name: "MKT" },
-    { team_id: "HR", team_name: "HR" },
-    { team_id: "ACC", team_name: "ACC" },
-    { team_id: "FIN", team_name: "FIN" },
-    { team_id: "ADMIN", team_name: "ADMIN" },
-    { team_id: "IT", team_name: "IT" },
-    { team_id: "S&P", team_name: "S&P" },
-    { team_id: "QA/QC", team_name: "QA/QC" },
-    { team_id: "KRDESK", team_name: "KRDESK" },
-    { team_id: "OPD", team_name: "OPD" },
-  ]; 
+// Team names are NOT enumerated here. There is no teams table; the real list
+// lives in users.team (~67 values and growing) and is served by
+// GET /users/teams — see listUserTeams() in api/users.ts. A hardcoded list
+// used to sit here and matched almost none of the actual departments.

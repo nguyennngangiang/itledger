@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Table, Button, Input, Popover } from "antd";
+import { Table, Button, Popover } from "antd";
 import type { TableColumnsType } from "antd";
 import { toast } from "react-toastify";
 import {
@@ -8,21 +8,22 @@ import {
   deleteMaintenance,
   deleteMaintenanceBatch,
   restoreMaintenance,
-  semanticSearchMaintenance,
 } from "../api/maintenance";
 import { listDevices } from "../api/devices";
-import { listUsers } from "../api/users";
-import type { Maintenance, MaintenanceRanked, Device, User } from "../types";
+import { listUsersIncludingDeleted } from "../api/users";
+import type { Maintenance, Device, User } from "../types";
 import { ConfirmModal } from "./Modal/ConfirmModal";
-import { BulkDeleteBar } from "./BulkDeleteBar";
+import { PanelHead } from "./PanelHead";
+import { SearchBox } from "./SearchBox";
 import { TrashToggle } from "./TrashToggle";
 import MaintenanceModal from "./Modal/MaintenanceModal";
-import { PlusIcon, RefreshIcon, SearchIcon, InfoIcon, TrashIcon, EditIcon, SparklesIcon, ProveIcon } from "./icons";
-import { useSmartProof } from "../lib/relevance";
+import { PlusIcon, RefreshIcon, InfoIcon, TrashIcon, EditIcon } from "./icons";
 import { formatDate, resolveOwner, toUserMap } from "../lib/format";
 import { usePagedList } from "../lib/usePagedList";
+import { useTableSelection } from "../lib/useTableSelection";
 import { TABLE_SCROLL } from "../lib/table";
 import { RepairStoryPanel } from "./RepairStoryPanel";
+import { useT } from "../i18n/useT";
 
 export const MaintenanceScreen = ({
   refreshKey = 0,
@@ -31,64 +32,22 @@ export const MaintenanceScreen = ({
   refreshKey?: number;
   onAdd?: () => void;
 }) => {
+  const { t } = useT();
   const [devices, setDevices] = useState<Record<string, Device>>({});
   const [users, setUsers] = useState<Record<string, User>>({});
-  const [searchText, setSearchText] = useState("");
   const [deleteTarget, setDeleteTarget] = useState<Maintenance | null>(null);
   const [editTarget, setEditTarget] = useState<Maintenance | null>(null);
-  const [selectedKeys, setSelectedKeys] = useState<string[]>([]);
   const [bulkConfirm, setBulkConfirm] = useState(false);
-  // Smart (semantic) search: when aiResults !== null the table shows ranked hits.
-  const [smart, setSmart] = useState(false);
-  const [rerank, setRerank] = useState(false); // LLM re-sort of smart results
-  const [aiResults, setAiResults] = useState<MaintenanceRanked[] | null>(null);
-  const [aiQuery, setAiQuery] = useState("");
-  const [aiLoading, setAiLoading] = useState(false);
   const [selected, setSelected] = useState<Maintenance | null>(null);
   const [deviceHistory, setDeviceHistory] = useState<Maintenance[]>([]);
-
-  const showingAi = aiResults !== null;
-
-  const { proofColumn } = useSmartProof<Maintenance>({
-    resource: "maintenance",
-    query: aiQuery,
-    idOf: (m) => m.maintenance_id,
-  });
-
-  const clearAi = () => {
-    setAiResults(null);
-    setAiQuery("");
-  };
-
-  const runSearch = async () => {
-    const q = searchText.trim();
-    if (!smart) {
-      list.applySearch(q);
-      return;
-    }
-    if (!q) {
-      clearAi();
-      return;
-    }
-    setAiLoading(true);
-    try {
-      const res = await semanticSearchMaintenance(q, 30, rerank);
-      setAiResults(res);
-      setAiQuery(q);
-    } catch (e) {
-      toast.error("Smart search failed: " + e);
-    } finally {
-      setAiLoading(false);
-    }
-  };
 
   const list = usePagedList<Maintenance>(pageMaintenance, {
     defaultOrderBy: "maintenance_date",
     defaultOrder: "desc",
     refreshKey,
   });
-
-  useEffect(() => setSelectedKeys([]), [list.trashed]);
+  const { selectedKeys, setSelectedKeys, clear, rowSelection } =
+    useTableSelection(list.trashed);
 
   // Selecting a repair loads that device's full history for the story panel.
   useEffect(() => {
@@ -114,20 +73,22 @@ export const MaintenanceScreen = ({
     try {
       await deleteMaintenanceBatch(selectedKeys, list.trashed);
       toast.success(
-        `${selectedKeys.length} record(s) ${
-          list.trashed ? "permanently deleted" : "moved to trash"
-        }`,
+        t(list.trashed ? "row.bulk.deleted" : "row.bulk.trashed", {
+          n: selectedKeys.length,
+        }),
       );
       setSelectedKeys([]);
     } catch (e) {
-      toast.error("Failed: " + e);
+      toast.error(t("row.toast.failed", { error: String(e) }));
     } finally {
       list.reload();
     }
   };
 
   useEffect(() => {
-    Promise.all([listDevices(), listUsers()])
+    // Includes trashed staff — a repair row resolves the device's owner, who
+    // may since have left; showing their name beats showing a bare code.
+    Promise.all([listDevices(), listUsersIncludingDeleted()])
       .then(([ds, us]) => {
         setDevices(Object.fromEntries(ds.map((d) => [d.serial_number, d])));
         setUsers(toUserMap(us));
@@ -139,9 +100,9 @@ export const MaintenanceScreen = ({
     setDeleteTarget(null);
     try {
       await deleteMaintenance(id, permanent);
-      toast.success(permanent ? "Permanently deleted" : "Moved to trash");
+      toast.success(t(permanent ? "row.toast.deleted" : "row.toast.trashed"));
     } catch (e) {
-      toast.error("Failed: " + e);
+      toast.error(t("row.toast.failed", { error: String(e) }));
     } finally {
       list.reload();
     }
@@ -150,9 +111,9 @@ export const MaintenanceScreen = ({
   const handleRestore = async (id: string) => {
     try {
       await restoreMaintenance(id);
-      toast.success("Restored");
+      toast.success(t("row.toast.restored"));
     } catch (e) {
-      toast.error("Failed: " + e);
+      toast.error(t("row.toast.failed", { error: String(e) }));
     } finally {
       list.reload();
     }
@@ -162,11 +123,14 @@ export const MaintenanceScreen = ({
 
   const detailBubble = (m: Maintenance) => {
     const rows: [string, string | number | null][] = [
-      ["Problem", m.reason],
-      ["Solution", m.solution],
-      ["Result", m.result],
-      ["Cost (VND)", m.cost_vnd != null ? m.cost_vnd.toLocaleString("vi-VN") : null],
-      ["Remarks", m.remarks],
+      [t("maint.detail.problem"), m.reason],
+      [t("maint.detail.solution"), m.solution],
+      [t("maint.detail.result"), m.result],
+      [
+        t("maint.detail.cost"),
+        m.cost_vnd != null ? m.cost_vnd.toLocaleString("vi-VN") : null,
+      ],
+      [t("maint.detail.remarks"), m.remarks],
     ];
     return (
       <dl className="detail-bubble">
@@ -182,14 +146,14 @@ export const MaintenanceScreen = ({
 
   const columns: TableColumnsType<Maintenance> = [
     {
-      title: "Date",
+      title: t("maint.col.date"),
       dataIndex: "maintenance_date",
       key: "maintenance_date",
       sorter: true,
       render: (v) => (v ? formatDate(v) : dash),
     },
     {
-      title: "Device",
+      title: t("maint.col.device"),
       dataIndex: "device_id",
       key: "device_id",
       sorter: true,
@@ -200,7 +164,7 @@ export const MaintenanceScreen = ({
       ),
     },
     {
-      title: "Owner",
+      title: t("maint.col.owner"),
       key: "owner",
       render: (_, m) => {
         const d = m.device_id ? devices[m.device_id] : undefined;
@@ -209,7 +173,7 @@ export const MaintenanceScreen = ({
       },
     },
     {
-      title: "Team",
+      title: t("maint.col.team"),
       key: "team",
       // Team always follows the device owner's current team, not the value
       // that happened to be stored on the maintenance record.
@@ -224,7 +188,7 @@ export const MaintenanceScreen = ({
       },
     },
     {
-      title: "Part",
+      title: t("maint.col.part"),
       dataIndex: "part",
       key: "part",
       sorter: true,
@@ -234,15 +198,19 @@ export const MaintenanceScreen = ({
       title: "",
       key: "options",
       width: 160,
-      render: (_, m) =>
-        list.trashed ? (
+      render: (_, m) => {
+        // Name the row in the label — every row shows the same three icons.
+        const label = `repair on ${m.device_id}`;
+        return list.trashed ? (
           <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
             <Button size="small" onClick={() => handleRestore(m.maintenance_id)}>
-              Restore
+              {t("row.action.restore")}
             </Button>
             <Button
               type="text"
               danger
+              aria-label={t("row.action.deleteForever", { label })}
+              title={t("row.action.deleteForever", { label })}
               icon={<TrashIcon size={18} />}
               onClick={() => setDeleteTarget(m)}
             />
@@ -250,160 +218,77 @@ export const MaintenanceScreen = ({
         ) : (
           <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
             <Popover
-              title="Repair details"
+              title={t("maint.detail.title")}
               content={detailBubble(m)}
-              trigger="hover"
+              trigger={["hover", "focus"]}
               placement="left"
             >
-              <span className="info-trigger">
+              <span
+                className="info-trigger"
+                tabIndex={0}
+                aria-label={t("row.action.details", { label })}
+              >
                 <InfoIcon size={18} />
               </span>
             </Popover>
             <Button
               type="text"
+              aria-label={t("row.action.edit", { label })}
+              title={t("row.action.edit", { label })}
               icon={<EditIcon size={18} />}
               onClick={() => setEditTarget(m)}
             />
             <Button
               type="text"
               danger
+              aria-label={t("row.action.trash", { label })}
+              title={t("row.action.trash", { label })}
               icon={<TrashIcon size={18} />}
               onClick={() => setDeleteTarget(m)}
             />
           </div>
-        ),
+        );
+      },
     },
   ];
 
   return (
     <>
       <div className="screen-toolbar">
-        <div className="screen-search">
-          <Input
-            allowClear
-            prefix={smart ? <SparklesIcon size={16} /> : <SearchIcon size={16} />}
-            placeholder={
-              smart
-                ? "Describe the repair you're looking for… (Enter)"
-                : "Search maintenance… (Enter)"
-            }
-            style={{ width: 320 }}
-            value={searchText}
-            onChange={(e) => {
-              setSearchText(e.target.value);
-              if (e.target.value === "") {
-                if (smart) clearAi();
-                else list.applySearch("");
-              }
-            }}
-            onPressEnter={runSearch}
-          />
-          <Button
-            type={smart ? "primary" : "default"}
-            icon={<SparklesIcon size={16} />}
-            title="AI semantic search — search by meaning, not keywords"
-            onClick={() => {
-              const next = !smart;
-              setSmart(next);
-              if (!next) clearAi();
-            }}
-          >
-            {smart ? "Smart: on" : "Smart"}
-          </Button>
-          {smart && (
-            <Button
-              type={rerank ? "primary" : "default"}
-              icon={<ProveIcon size={16} />}
-              title="Re-rank smart results with the LLM — it learns from your marks"
-              onClick={() => setRerank((v) => !v)}
-            >
-              {rerank ? "LLM rerank: on" : "LLM rerank"}
-            </Button>
-          )}
-        </div>
+        <SearchBox placeholder={t("search.maintenance")} {...list.searchProps} />
         <div className="toolbar-actions">
           <TrashToggle trashed={list.trashed} onToggle={list.toggleTrash} />
           <Button icon={<RefreshIcon size={16} />} onClick={list.reload}>
-            Refresh
+            {t("device.refresh")}
           </Button>
           <Button type="primary" icon={<PlusIcon size={16} />} onClick={onAdd}>
-            Log Maintenance
+            {t("maint.add")}
           </Button>
         </div>
       </div>
 
-      {showingAi && (
-        <div className="ai-banner">
-          <span className="ai-banner-text">
-            <SparklesIcon size={16} />
-            Smart results for <b>“{aiQuery}”</b> — {aiResults!.length} matches,
-            {rerank
-              ? " re-ranked by the LLM · it learns from your marks"
-              : " ranked by meaning"}
-          </span>
-          <Button size="small" onClick={clearAi}>
-            Clear
-          </Button>
-        </div>
-      )}
-
       <div className="split-view">
         <div className="panel table-panel">
-          <div className="panel-head">
-            <span className="panel-title">
-              {showingAi
-                ? "Smart results"
-                : list.trashed
-                ? "Trash"
-                : "Maintenance records"}
-            </span>
-            {selectedKeys.length > 0 ? (
-              <BulkDeleteBar
-                count={selectedKeys.length}
-                trashed={list.trashed}
-                onDelete={() => setBulkConfirm(true)}
-                onClear={() => setSelectedKeys([])}
-              />
-            ) : (
-              <span className="panel-count">
-                {showingAi ? `${aiResults!.length} matches` : `${list.total} total`}
-              </span>
-            )}
-          </div>
+          <PanelHead
+            title="maint.panel"
+            trashed={list.trashed}
+            total={list.total}
+            selectedCount={selectedKeys.length}
+            onBulkDelete={() => setBulkConfirm(true)}
+            onClearSelection={clear}
+          />
           <div className="table-wrap">
-            {showingAi ? (
-              <Table<Maintenance>
-                rowKey="maintenance_id"
-                columns={[proofColumn, ...columns]}
-                dataSource={aiResults!}
-                loading={aiLoading}
-                pagination={false}
-                scroll={TABLE_SCROLL}
-                rowSelection={{
-                  selectedRowKeys: selectedKeys,
-                  onChange: (keys) => setSelectedKeys(keys as string[]),
-                }}
-                onRow={(m) => ({
-                  onClick: () => setSelected(m),
-                  className: selected?.maintenance_id === m.maintenance_id ? "row-selected" : "",
-                })}
-              />
-            ) : (
-              <Table<Maintenance>
-                rowKey="maintenance_id"
-                columns={columns}
-                scroll={TABLE_SCROLL}
-                rowSelection={{
-                  selectedRowKeys: selectedKeys,
-                  onChange: (keys) => setSelectedKeys(keys as string[]),
-                }}
-                onRow={(m) => ({
-                  onClick: () => setSelected(m),
-                  className: selected?.maintenance_id === m.maintenance_id ? "row-selected" : "",
-                })}
-                {...list.tableProps}
-              />
-            )}
+            <Table<Maintenance>
+              rowKey="maintenance_id"
+              columns={columns}
+              scroll={TABLE_SCROLL}
+              rowSelection={rowSelection}
+              onRow={(m) => ({
+                onClick: () => setSelected(m),
+                className: selected?.maintenance_id === m.maintenance_id ? "row-selected" : "",
+              })}
+              {...list.tableProps}
+            />
           </div>
         </div>
 
@@ -421,8 +306,7 @@ export const MaintenanceScreen = ({
         ) : (
           <div className="panel detail-panel">
             <div className="detail-panel-empty">
-              Select a repair to read its story — problem, fix, result, and this
-              device's other repairs.
+              {t("detail.empty.maintenance")}
             </div>
           </div>
         )}
@@ -443,8 +327,8 @@ export const MaintenanceScreen = ({
         <ConfirmModal
           message={
             list.trashed
-              ? "Permanently delete this maintenance record? This cannot be undone."
-              : "Move this maintenance record to trash?"
+              ? t("maint.confirm.delete")
+              : t("maint.confirm.trash")
           }
           onConfirm={() =>
             handleDelete(deleteTarget.maintenance_id, list.trashed)
@@ -457,8 +341,8 @@ export const MaintenanceScreen = ({
         <ConfirmModal
           message={
             list.trashed
-              ? `Permanently delete ${selectedKeys.length} selected record(s)? This cannot be undone.`
-              : `Move ${selectedKeys.length} selected record(s) to trash?`
+              ? t("maint.confirm.bulkDelete", { n: selectedKeys.length })
+              : t("maint.confirm.bulkTrash", { n: selectedKeys.length })
           }
           onConfirm={handleBulkDelete}
           onCancel={() => setBulkConfirm(false)}

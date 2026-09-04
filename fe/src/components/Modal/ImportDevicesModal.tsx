@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Button, Table, Alert } from "antd";
 import type { TableColumnsType } from "antd";
 import * as XLSX from "xlsx";
@@ -6,56 +6,36 @@ import { toast } from "react-toastify";
 import { importDevices } from "../../api/devices";
 import { ApiError } from "../../api/client";
 import type { DeviceCreate, DeviceStatus } from "../../types";
-import { DEVICE_STATUS_ORDER } from "../../types";
+import { DEVICE_STATUS_ORDER, DEVICE_STATUS_META } from "../../types";
+import { clean, norm, toIsoDate } from "../../lib/importHeaders";
 import { UploadIcon } from "../icons";
 import { Modal } from "./Modal";
+import { useT } from "../../i18n/useT";
 
-// Normalize a spreadsheet header ("Serial Number", "serial_number", "SN") to a
-// comparable key so column order / casing / punctuation don't matter.
-const norm = (h: string) => h.toLowerCase().replace(/[^a-z0-9]/g, "");
-
-// Accepted header aliases → device field. Extend freely.
+// Accepted header aliases → device field. Extend freely. `norm` folds diacritics,
+// so Vietnamese column names can be listed the way people actually type them.
 const HEADER_ALIASES: Record<string, keyof DeviceCreate> = {
   serialnumber: "serial_number", serial: "serial_number", sn: "serial_number",
-  serialno: "serial_number",
+  serialno: "serial_number", soserial: "serial_number",
   barcode: "barcode",
-  type: "type", devicetype: "type",
-  brand: "brand", manufacturer: "brand",
+  type: "type", devicetype: "type", loai: "type", loaithietbi: "type",
+  brand: "brand", manufacturer: "brand", hang: "brand", hangsanxuat: "brand",
   cpu: "cpu", processor: "cpu",
   ram: "ram", memory: "ram",
   storage: "storage", disk: "storage", ssd: "storage", hdd: "storage",
-  os: "os", operatingsystem: "os",
+  ocung: "storage",
+  os: "os", operatingsystem: "os", hedieuhanh: "os",
   msoffice: "msoffice", office: "msoffice",
   buydate: "buy_date", purchasedate: "buy_date", date: "buy_date",
-  name: "name", devicename: "name",
+  ngaymua: "buy_date",
+  name: "name", devicename: "name", tenmay: "name", tenthietbi: "name",
   userid: "user_id", owner: "user_id", user: "user_id",
   employee: "user_id", employeecode: "user_id",
-  status: "status",
+  nguoisudung: "user_id", nguoidung: "user_id", manv: "user_id",
+  status: "status", trangthai: "status", tinhtrang: "status",
 };
 
 const STATUSES = new Set<string>(DEVICE_STATUS_ORDER);
-
-function toIsoDate(value: unknown): string | null {
-  if (value == null || value === "") return null;
-  if (value instanceof Date) return value.toISOString().slice(0, 10);
-  const s = String(value).trim();
-  // Already ISO.
-  if (/^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(0, 10);
-  // DD/MM/YYYY or DD-MM-YYYY → YYYY-MM-DD.
-  const m = s.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{2,4})$/);
-  if (m) {
-    const [, d, mo, y] = m;
-    const yyyy = y.length === 2 ? `20${y}` : y;
-    return `${yyyy}-${mo.padStart(2, "0")}-${d.padStart(2, "0")}`;
-  }
-  return null;
-}
-
-function clean(value: unknown): string | null {
-  if (value == null) return null;
-  const s = String(value).trim();
-  return s === "" ? null : s;
-}
 
 // Map one raw spreadsheet row (header→cell) to a DeviceCreate.
 function rowToDevice(raw: Record<string, unknown>): DeviceCreate | null {
@@ -85,19 +65,34 @@ function rowToDevice(raw: Record<string, unknown>): DeviceCreate | null {
   };
 }
 
-export function ImportDevicesModal({ onClose }: { onClose: () => void }) {
+export function ImportDevicesModal({
+  onClose,
+  onDone,
+  file,
+  embedded = false,
+  queueLabel,
+}: {
+  onClose: () => void;
+  onDone?: (summary?: string) => void;
+  /** Pre-picked file (from the auto-detecting ImportModal) — skips the picker. */
+  file?: File;
+  /** Rendered inside the import queue rather than as its own dialog. */
+  embedded?: boolean;
+  queueLabel?: string;
+}) {
+  const { t } = useT();
   const inputRef = useRef<HTMLInputElement>(null);
-  const [fileName, setFileName] = useState<string | null>(null);
+  const [fileName, setFileName] = useState<string | null>(file?.name ?? null);
   const [rows, setRows] = useState<DeviceCreate[]>([]);
   const [skipped, setSkipped] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
-  const parseFile = async (file: File) => {
+  const parseFile = async (picked: File) => {
     setError(null);
-    setFileName(file.name);
+    setFileName(picked.name);
     try {
-      const buf = await file.arrayBuffer();
+      const buf = await picked.arrayBuffer();
       const wb = XLSX.read(buf, { type: "array", cellDates: true });
       const sheet = wb.Sheets[wb.SheetNames[0]];
       const raw = XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet, {
@@ -109,46 +104,67 @@ export function ImportDevicesModal({ onClose }: { onClose: () => void }) {
       setSkipped(parsed.length - valid.length);
       if (!valid.length) {
         setError(
-          'No valid rows found. Ensure there is a "Serial Number" column.',
+          t("sheet.device.noRows"),
         );
       }
     } catch (e) {
-      setError("Could not read that file. Use a .xlsx, .xls or .csv export.");
+      setError(t("sheet.unreadable"));
       setRows([]);
       setSkipped(0);
       console.error(e);
     }
   };
 
+  useEffect(() => {
+    // The file identity is the trigger; `parseFile` is recreated every render, so
+    // depending on it would re-parse on every keystroke elsewhere.
+    if (file) parseFile(file);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [file]);
+
   const handleImport = async () => {
     setBusy(true);
     setError(null);
     try {
       const res = await importDevices(rows);
-      toast.success(
-        `Imported ${res.inserted} device${res.inserted === 1 ? "" : "s"}` +
-          (res.skipped ? ` · ${res.skipped} already existed` : ""),
+      const summary = t(
+        res.skipped ? "sheet.device.done.skipped" : "sheet.device.done",
+        { n: res.inserted, skipped: res.skipped },
       );
+      // In a bulk run the queue reports every file at the end — see the same note
+      // in ImportMaintenanceModal.
+      if (!embedded) toast.success(summary);
+      onDone?.(summary);
       onClose();
     } catch (e) {
-      setError(e instanceof ApiError ? e.message : "Import failed");
+      setError(e instanceof ApiError ? e.message : t("sheet.failed"));
     } finally {
       setBusy(false);
     }
   };
 
   const columns: TableColumnsType<DeviceCreate> = [
-    { title: "Serial", dataIndex: "serial_number", key: "serial_number" },
-    { title: "Name", dataIndex: "name", key: "name", render: (v) => v || "—" },
-    { title: "Type", dataIndex: "type", key: "type", render: (v) => v || "—" },
-    { title: "Brand", dataIndex: "brand", key: "brand", render: (v) => v || "—" },
-    { title: "Owner", dataIndex: "user_id", key: "user_id", render: (v) => v || "—" },
-    { title: "Status", dataIndex: "status", key: "status" },
+    { title: t("sheet.col.serial"), dataIndex: "serial_number", key: "serial_number" },
+    { title: t("sheet.col.name"), dataIndex: "name", key: "name", render: (v) => v || "—" },
+    { title: t("sheet.col.type"), dataIndex: "type", key: "type", render: (v) => v || "—" },
+    { title: t("sheet.col.brand"), dataIndex: "brand", key: "brand", render: (v) => v || "—" },
+    { title: t("sheet.col.owner"), dataIndex: "user_id", key: "user_id", render: (v) => v || "—" },
+    {
+      title: t("sheet.col.status"),
+      dataIndex: "status",
+      key: "status",
+      render: (v: DeviceStatus | null | undefined) =>
+        (v && DEVICE_STATUS_META[v]?.label) || v || "—",
+    },
   ];
 
-  return (
-    <Modal title="Import Devices" onClose={onClose}>
+  const body = (
       <div className="modal-form">
+        {queueLabel && (
+          <div className="import-steps">
+            <span className="text-faint">{queueLabel}</span>
+          </div>
+        )}
         <input
           ref={inputRef}
           type="file"
@@ -163,10 +179,10 @@ export function ImportDevicesModal({ onClose }: { onClose: () => void }) {
 
         <div className="import-drop">
           <Button icon={<UploadIcon size={16} />} onClick={() => inputRef.current?.click()}>
-            Choose .xlsx / .csv
+            {t("sheet.choose")}
           </Button>
           <span className="import-hint">
-            {fileName ?? "Needs a Serial Number column; other columns are matched by name."}
+            {fileName ?? t("sheet.device.hint")}
           </span>
         </div>
 
@@ -175,9 +191,11 @@ export function ImportDevicesModal({ onClose }: { onClose: () => void }) {
         {rows.length > 0 && (
           <>
             <p className="import-summary">
-              <b>{rows.length}</b> device{rows.length === 1 ? "" : "s"} ready to import
+              {t("sheet.device.ready", { n: rows.length })}
               {skipped > 0 && (
-                <span className="text-faint"> · {skipped} row(s) skipped (no serial)</span>
+                <span className="text-faint">
+                  {t("sheet.skipped", { n: skipped })}
+                </span>
               )}
             </p>
             <div className="table-wrap import-preview">
@@ -194,7 +212,7 @@ export function ImportDevicesModal({ onClose }: { onClose: () => void }) {
 
         <div className="modal-actions">
           <Button onClick={onClose} disabled={busy}>
-            Cancel
+            {t(embedded ? "sheet.dropFile" : "sheet.cancel")}
           </Button>
           <Button
             type="primary"
@@ -203,10 +221,16 @@ export function ImportDevicesModal({ onClose }: { onClose: () => void }) {
             loading={busy}
             onClick={handleImport}
           >
-            Import {rows.length || ""}
+            {t("sheet.import")} {rows.length || ""}
           </Button>
         </div>
       </div>
+  );
+
+  if (embedded) return body;
+  return (
+    <Modal title={t("sheet.device.title")} onClose={onClose} width={860}>
+      {body}
     </Modal>
   );
 }

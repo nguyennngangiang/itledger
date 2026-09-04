@@ -1,17 +1,9 @@
-import { request } from './client'
-import type { Handover, HandoverCreate, HandoverRanked } from '../types'
+import { deleteBatch, request } from './client'
+import type { Handover, HandoverCreate } from '../types'
 import { pageQuery } from './paging'
 import type { Paged, PageParams } from './paging'
 
-// Natural-language semantic search, ranked by the local embedding service.
-// `rerank` re-sorts the top hits with the LLM (learns from marked feedback).
-export function semanticSearchHandovers(q: string, limit = 30, rerank = false) {
-  return request<HandoverRanked[]>(
-    `/handovers/semantic-search?q=${encodeURIComponent(q)}&limit=${limit}${
-      rerank ? '&rerank=true' : ''
-    }`,
-  )
-}
+// Semantic search was dropped from the UI — see the note in devices.ts.
 
 export function listHandovers(deviceId?: string, fromUserId?: string, toUserId?: string) {
   const params = new URLSearchParams()
@@ -24,6 +16,12 @@ export function listHandovers(deviceId?: string, fromUserId?: string, toUserId?:
 
 export function pageHandovers(params: PageParams) {
   return request<Paged<Handover>>(`/handovers/page?${pageQuery(params)}`)
+}
+
+// { column -> values already used }, for the handover form's Reason autocomplete,
+// so it offers the wording the team actually writes and not only a fixed list.
+export function handoverSuggestions() {
+  return request<Record<string, string[]>>('/handovers/suggestions')
 }
 
 export function restoreHandover(handoverId: string) {
@@ -61,8 +59,5 @@ export function deleteHandover(handoverId: string, permanent = false) {
 
 // Bulk delete by id (soft-delete, or purge when permanent).
 export function deleteHandoversBatch(ids: string[], permanent = false) {
-  return request<void>(`/handovers/batch${permanent ? '?permanent=true' : ''}`, {
-    method: 'DELETE',
-    body: JSON.stringify(ids),
-  })
+  return deleteBatch('handovers', ids, permanent)
 }

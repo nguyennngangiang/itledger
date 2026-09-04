@@ -1,17 +1,25 @@
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, Response, status
+from fastapi import FastAPI, Request, Response, status
 from fastapi.middleware.cors import CORSMiddleware
-from . import db
+from fastapi.responses import JSONResponse
+from . import db, migrations
 from .config import settings
-from .repositories import feedback as feedback_repo
-from .routers import assistant, devices, feedback, handovers, maintenance, users
+from .repositories.errors import (
+    DuplicateError,
+    ForeignKeyError,
+    InUseError,
+    ProtectedError,
+)
+from .routers import devices, feedback, handovers, imports, maintenance, users
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await db.connect()
-    # Ensure the search_feedback table exists on already-running databases
-    # (schema.sql only runs on a fresh volume).
-    await feedback_repo.ensure_table(db.get_pool())
+    # Schema changes are applied here, idempotently, because schema.sql only runs
+    # on a fresh volume — the deployed database holds real data and must never be
+    # recreated to pick up a column. Everything in migrations.py is also mirrored
+    # in schema.sql so a fresh machine gets the same shape.
+    await migrations.run(db.get_pool())
     yield
     await db.disconnect()
 
@@ -25,12 +33,38 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+async def _conflict(request: Request, exc: Exception) -> JSONResponse:
+    """Every domain refusal is a 409 carrying the repository's own message.
+
+    DuplicateError  a unique constraint (serial, barcode, employee code)
+    ForeignKeyError a referenced row is missing, or still references this one
+    InUseError      refused up front (an employee who still holds devices)
+    ProtectedError  a structural row (the IT-STORE ghost)
+
+    Registered centrally so a router that forgets to catch one returns 409
+    rather than 500 — which is how permanently deleting a device with history
+    used to crash. Deliberately NOT extended to ValueError: Pydantic and half
+    the standard library raise that, and blanket-mapping it to 4xx would turn
+    real bugs into silent client errors. Those stay caught locally.
+    """
+    return JSONResponse(status_code=409, content={"detail": str(exc)})
+
+
+for _domain_error in (DuplicateError, ForeignKeyError, InUseError, ProtectedError):
+    app.add_exception_handler(_domain_error, _conflict)
+
 app.include_router(devices.router)
 app.include_router(handovers.router)
 app.include_router(maintenance.router)
 app.include_router(users.router)
 app.include_router(feedback.router)
-app.include_router(assistant.router)
+app.include_router(imports.router)
+
+# routers/assistant.py is deliberately NOT mounted. It is the Ask AI feature, and
+# the LLM stack it talked to has been retired, so /assistant/* answers 404 rather
+# than spending its full timeout reaching for a host that is not listening. The
+# module is kept on disk: restoring the import and this line, plus AI_ENABLED=1 and
+# a running model server, is the whole of turning it back on.
 
 
 @app.get("/health", tags=["meta"])

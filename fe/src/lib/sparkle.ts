@@ -89,16 +89,45 @@ export function installButtonPress(): () => void {
   return () => document.removeEventListener("pointerdown", onDown, true);
 }
 
+/** anime.js writes inline styles, so the CSS `transition: none` under
+ * prefers-reduced-motion (App.css) cannot reach the pill — it has to be asked here. */
+const reduceMotion = () =>
+  window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+/** Is the pill hidden, or on its way there? An unset opacity means fully shown. */
+function isFading(el: HTMLElement) {
+  const o = el.style.opacity;
+  return o !== "" && parseFloat(o) < 1;
+}
+
 /**
  * Slide the active nav "pill" indicator to the current tab. Animates the
  * highlight element's position/width to match the active button, with a smooth
  * glide plus a tiny squash-and-stretch so the switch feels playful.
+ *
+ * Coming back from a page with no tab (Dashboard, Notifications) the pill is
+ * hidden and parked wherever it last was, so it is moved into place *before*
+ * fading in — otherwise it would streak across the nav from a stale position.
  */
 export function slideNavIndicator(indicator: HTMLElement, active: HTMLElement) {
+  // "" = never faded, i.e. fully visible. Anything below 1 counts as hidden so a
+  // fast bell → tab click mid-fade still snaps rather than streaks.
+  const hidden = isFading(indicator);
+  const still = reduceMotion();
+
+  if (hidden || still) {
+    anime.remove(indicator);
+    indicator.style.left = `${active.offsetLeft}px`;
+    indicator.style.width = `${active.offsetWidth}px`;
+    indicator.style.opacity = "1";
+    return;
+  }
+
   anime({
     targets: indicator,
     left: active.offsetLeft,
     width: active.offsetWidth,
+    opacity: 1,
     duration: 620,
     easing: "cubicBezier(0.22, 1, 0.36, 1)", // smooth easeOutQuint-like glide
   });
@@ -107,6 +136,30 @@ export function slideNavIndicator(indicator: HTMLElement, active: HTMLElement) {
     scaleY: [{ value: 0.72, duration: 150 }, { value: 1, duration: 470 }],
     scaleX: [{ value: 1.06, duration: 150 }, { value: 1, duration: 470 }],
     easing: "easeOutBack",
+  });
+}
+
+/**
+ * Retract the pill when no tab is active.
+ *
+ * Dashboard (the brand) and Notifications (the bell) are pages without a nav
+ * tab. Leaving the pill parked under the tab you came from left a purple slab
+ * behind — and that tab, having lost `.active`, had gone back to dark text, so
+ * it read as black-on-purple.
+ */
+export function hideNavIndicator(indicator: HTMLElement) {
+  if (indicator.style.opacity === "0") return;
+  if (reduceMotion() || indicator.style.width === "" || indicator.style.width === "0px") {
+    // Nothing was ever shown (first paint lands on Dashboard) — no fade to run.
+    anime.remove(indicator);
+    indicator.style.opacity = "0";
+    return;
+  }
+  anime({
+    targets: indicator,
+    opacity: 0,
+    duration: 180,
+    easing: "easeOutQuad",
   });
 }
 

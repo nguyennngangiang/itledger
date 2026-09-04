@@ -1,17 +1,9 @@
-import { request } from './client'
-import type { Maintenance, MaintenanceCreate, MaintenanceRanked } from '../types'
+import { deleteBatch, request } from './client'
+import type { Maintenance, MaintenanceCreate } from '../types'
 import { pageQuery } from './paging'
 import type { Paged, PageParams } from './paging'
 
-// Natural-language semantic search, ranked by the local embedding service.
-// `rerank` re-sorts the top hits with the LLM (learns from marked feedback).
-export function semanticSearchMaintenance(q: string, limit = 30, rerank = false) {
-  return request<MaintenanceRanked[]>(
-    `/maintenance/semantic-search?q=${encodeURIComponent(q)}&limit=${limit}${
-      rerank ? '&rerank=true' : ''
-    }`,
-  )
-}
+// Semantic search was dropped from the UI — see the note in devices.ts.
 
 export function listMaintenance(deviceId?: string, team?: string) {
   const params = new URLSearchParams()
@@ -25,8 +17,20 @@ export function pageMaintenance(params: PageParams) {
   return request<Paged<Maintenance>>(`/maintenance/page?${pageQuery(params)}`)
 }
 
-export function searchMaintenance(q: string) {
-  return request<Maintenance[]>(`/maintenance/search?q=${encodeURIComponent(q)}`)
+// Bulk import parsed repair rows. Re-importing the same file is idempotent, and
+// rows naming an unknown serial come back in `skipped` rather than failing the
+// batch — see be/repositories/maintenance.import_maintenance.
+export function importMaintenance(records: MaintenanceCreate[]) {
+  return request<{ inserted: number; skipped: number; total: number }>(
+    '/maintenance/import',
+    { method: 'POST', body: JSON.stringify(records) },
+  )
+}
+
+// { column -> values already used }, for the repair form's autocompletes, so
+// it suggests the phrasing the team actually writes.
+export function maintenanceSuggestions() {
+  return request<Record<string, string[]>>('/maintenance/suggestions')
 }
 
 export function restoreMaintenance(maintenanceId: string) {
@@ -64,8 +68,5 @@ export function deleteMaintenance(maintenanceId: string, permanent = false) {
 
 // Bulk delete by id (soft-delete, or purge when permanent).
 export function deleteMaintenanceBatch(ids: string[], permanent = false) {
-  return request<void>(`/maintenance/batch${permanent ? '?permanent=true' : ''}`, {
-    method: 'DELETE',
-    body: JSON.stringify(ids),
-  })
+  return deleteBatch('maintenance', ids, permanent)
 }

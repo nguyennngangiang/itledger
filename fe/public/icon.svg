@@ -1,0 +1,34 @@
+<!--
+  IT Ledger app icon. This IS `LogoMark` (src/components/icons.tsx) on the
+  `.topbar-logo` tile (src/App.css) — same three stacked layers, same
+  #6366f1 -> #4f46e5 135deg gradient, same ~26% corner radius.
+
+  One deliberate difference: the tile padding. LogoMark's ink spans x 4->20 of a
+  24 grid and renders at 20px inside a 34px chip, so it fills only 39% of the
+  tile. At a 16x16 favicon that puts the stroke at 0.75 device px — under one
+  pixel, so all three lines render as grey mush. Here the same drawing is scaled
+  x1.25 into a 32-unit tile (ink 62.5% wide), lifting the stroke to 1.2 device px
+  at 16px. The stroke-to-glyph ratio is untouched: 1.9/16 in the component,
+  2.4/20 here. Nothing is redrawn — only the margin changes.
+
+  No shape-rendering hint: every segment is a diagonal, so crispEdges would only
+  produce jaggies and geometricPrecision is already the default.
+-->
+<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32">
+  <defs>
+    <!-- linear-gradient(135deg, ...) on a square == the top-left -> bottom-right diagonal. -->
+    <linearGradient id="tile" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#6366f1" />
+      <stop offset="1" stop-color="#4f46e5" />
+    </linearGradient>
+  </defs>
+
+  <rect width="32" height="32" rx="8" fill="url(#tile)" />
+
+  <g fill="none" stroke="#ffffff" stroke-width="2.4"
+     stroke-linecap="round" stroke-linejoin="round">
+    <path d="M6 10 L16 5 L26 10 L16 15 Z" />
+    <path d="M6 16 L16 21 L26 16" />
+    <path d="M6 22 L16 27 L26 22" />
+  </g>
+</svg>
