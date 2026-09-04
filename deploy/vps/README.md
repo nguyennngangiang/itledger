@@ -23,6 +23,10 @@ the company template via plain parsing in `be/handover_sheet.py`. Do not go look
 for an embedder or an Ollama to stand up — `ai/` and `deploy/fetch-model.ps1` are
 dormant code, not a missing dependency.
 
+If the LLM is meant to come along, read [`LLM.md`](LLM.md) first: it inventories what
+exists on both sides, what switching it back on costs, and why copying 18 GB of
+Ollama onto a CPU-only VPS is the option that looks obvious and is not.
+
 ## Files here
 
 | File | Purpose |
@@ -33,6 +37,7 @@ dormant code, not a missing dependency.
 | `Dockerfile.api` | Real API image, instead of the bind-mount + pip-at-startup dev setup |
 | `Caddyfile` | Site block with Linux paths. **Draft — set the hostname and root** |
 | `.env.example` | Copy to `.env`; `POSTGRES_PASSWORD` is required |
+| `LLM.md` | The model side: what exists, what it did, and the four ways to bring it over |
 
 `docker-compose.vps.yml`, `Dockerfile.api` and `Caddyfile` were written on the
 Windows server and **have never been started on a Linux host**. They are a correct
