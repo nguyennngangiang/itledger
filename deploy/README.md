@@ -3,6 +3,12 @@
 Serves IT Ledger to the office network at **http://192.168.3.252:10000**, and brings
 the whole stack back after someone logs in following a reboot.
 
+> **Moving to a Linux VPS?** This file describes the Windows host, and several of its
+> rules (compose must run inside WSL, the PowerShell autostart, the `D:/` paths in the
+> Caddyfile) do not survive the move. Read [`vps/README.md`](vps/README.md) instead —
+> it carries the Linux stack, the database dump/restore scripts, and the list of what
+> a fresh clone is missing.
+
 ## What runs where
 
 | Piece | Where | Address |

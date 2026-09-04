@@ -1,0 +1,66 @@
+# IT Ledger on a Linux VPS — the whole stack, standalone.
+#
+# DRAFT: written on the Windows server during the move and never started there,
+# because there was no Linux host to start it on. Read it before running it.
+#
+#   docker compose -f deploy/vps/docker-compose.vps.yml up -d --build
+#
+# Run from the REPO ROOT (the build contexts are repo-relative). Unlike the LAN
+# deployment there is no WSL in the picture and no `-f docker-compose.yml -f
+# docker-compose.prod.yml` pair to merge: this file replaces both.
+#
+# Differences from be/docker-compose.yml that matter:
+#   - The API is a built image (deploy/vps/Dockerfile.api), not a bind-mounted
+#     repo with pip running at container start.
+#   - No extra_hosts / AI_URL. The embedder and the LLM are gone — AI_ENABLED=0
+#     is the deployed state and nothing calls out to a model.
+#   - POSTGRES_PASSWORD comes from the environment. The LAN files hard-code
+#     `poop`, which was survivable on an office network behind a loopback bind
+#     and is not survivable on a VPS. Put a real one in .env beside this file.
+#   - Postgres publishes nothing at all. Only the api container talks to it.
+name: itledger
+
+services:
+  db:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in deploy/vps/.env}
+      POSTGRES_DB: ${POSTGRES_DB:-itledger}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      # Runs ONCE, on a fresh volume only. It creates the unaccent extension and
+      # the empty schema — which is why restore-db.sh must pass --clean
+      # --if-exists when it loads the dump on top. See that script's header.
+      - ../../be/sql/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
+    # No ports. Nothing outside this compose network needs Postgres; reach it
+    # with `docker compose exec db psql -U postgres -d itledger`.
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-itledger}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  api:
+    build:
+      context: ../..
+      dockerfile: deploy/vps/Dockerfile.api
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-itledger}
+      # Caddy serves the SPA and /api from one origin, so CORS is not exercised
+      # by the app. Kept for direct API calls while troubleshooting.
+      CORS_ORIGINS: ${PUBLIC_ORIGIN:-http://localhost}
+      # Master switch for everything that reaches a model. Off is the deployed
+      # state — see be/.env.example.
+      AI_ENABLED: "0"
+    # Loopback only: Caddy on the host is what puts this on the internet.
+    ports:
+      - "127.0.0.1:8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+
+volumes:
+  pgdata:

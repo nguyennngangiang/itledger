@@ -37,3 +37,7 @@ deploy/*.log
 # was split off that stack — see deploy/README.md. Not tracked; deploy/Caddyfile
 # and start-itledger.ps1 are what matter.
 deploy/caddy.exe
+
+# Database dumps taken for the VPS move (deploy/vps/dump-db.sh). They hold real
+# employee names and codes, and are carried to the server out of band, never here.
+backups/

@@ -1,0 +1,52 @@
+# IT Ledger site block for the Linux VPS.
+#
+# DRAFT: adapted from deploy/Caddyfile + deploy/Caddyfile.site (the Windows pair)
+# and never started here. Two things were changed and one was deliberately not.
+#
+# CHANGED: the paths. The Windows block hard-codes D:/itledger/fe/dist and
+# D:/itledger/deploy/access.log. Set SITE_ROOT below to wherever the repo lives
+# on the VPS (/srv/itledger/fe/dist if you clone to /srv/itledger).
+#
+# CHANGED: the site address. :10000 was an office-LAN port. On a VPS use the real
+# hostname so Caddy provisions TLS automatically; drop back to :80 only while
+# testing without DNS.
+#
+# NOT CHANGED, and must not be: the two `handle` blocks. Caddy sorts directives
+# by its own order rather than source order, and `try_files` sorts BEFORE
+# `handle`. A bare site-level `try_files` therefore rewrites /api/health to
+# /index.html before handle_path can match it, and every API call silently
+# returns the SPA with a 200. Wrapping both in `handle` makes them one mutually
+# exclusive group evaluated top to bottom. The check for this is that
+# `curl https://<host>/api/health` returns JSON and not HTML.
+#
+# The Windows config sets `admin off`, which is why `caddy reload` does not work
+# there. It is left ON here so systemd can `caddy reload --config ...` normally.
+
+itledger.example.com {
+	encode gzip zstd
+
+	handle_path /api/* {
+		reverse_proxy 127.0.0.1:8000 {
+			transport http {
+				# Reading a handover record is the longest call the API makes.
+				# It is plain-code Excel parsing now, not a model — seconds.
+				read_timeout 120s
+			}
+		}
+	}
+
+	handle {
+		root * /srv/itledger/fe/dist
+		# react-router deep links (/maintenance, /handovers, ...) are not real
+		# files; fall back to index.html so a refresh on those URLs works.
+		try_files {path} /index.html
+		file_server
+	}
+
+	log {
+		output file /var/log/caddy/itledger-access.log {
+			roll_size 10MiB
+			roll_keep 5
+		}
+	}
+}
