@@ -1,9 +1,17 @@
+# Xoay vòng log cho MỌI service. Không có nó thì `json-file` mặc định tăng VÔ
+# HẠN: đo trên chính máy này, log của một container đã đạt 2,25 GB trong một
+# tệp duy nhất. `docker system df` KHÔNG đếm log container nên nó vô hình.
+x-log: &log
+  driver: json-file
+  options: {max-size: "50m", max-file: "3"}
+
 # docker-compose.yml
 name: itledger
 
 services:
   db:
     image: postgres:16
+    logging: *log
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: poop
@@ -23,6 +31,7 @@ services:
 
   api:
     image: python:3.12-slim
+    logging: *log
     working_dir: /workspace
     volumes:
       - ..:/workspace

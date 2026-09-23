@@ -1,3 +1,11 @@
+# Xoay vòng log cho MỌI service. `json-file` mặc định tăng VÔ HẠN: đo trên
+# chính VPS này, log của một container đã đạt 2,25 GB trong một tệp duy nhất, và
+# `docker system df` KHÔNG đếm log container nên nó vô hình với mọi lần kiểm
+# dung lượng thông thường.
+x-log: &log
+  driver: json-file
+  options: {max-size: "50m", max-file: "3"}
+
 # IT Ledger on a Linux VPS — the whole stack, standalone.
 #
 # DRAFT: written on the Windows server during the move and never started there,
@@ -22,7 +30,11 @@ name: itledger
 
 services:
   db:
-    image: postgres:16
+    # pgvector/pgvector:pg16 is postgres:16 plus the `vector` extension
+    # (be/repositories/document.py DOCUMENTS_DDL) — multi-arch, same data
+    # directory format, so it's a drop-in swap onto the existing volume.
+    image: pgvector/pgvector:pg16
+    logging: *log
     restart: unless-stopped
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-postgres}
@@ -42,25 +54,68 @@ services:
       timeout: 5s
       retries: 10
 
+  # Local model runtime for the document RAG feature (be/routers/documents.py):
+  # bge-m3 for embeddings, qwen2.5:7b as the server-side chat fallback for a
+  # browser without WebGPU. CPU-only on this host — no GPU passthrough, nothing
+  # to configure beyond the image. No published port: only `api` reaches it,
+  # over this compose network, same as `db`.
+  #
+  # Pull the models once after the stack is up (not automated — same "run it by
+  # hand once" spirit as dump-db.sh/restore-db.sh):
+  #   docker compose -f deploy/vps/docker-compose.vps.yml exec ollama ollama pull qwen2.5:7b
+  #   docker compose -f deploy/vps/docker-compose.vps.yml exec ollama ollama pull bge-m3
+  ollama:
+    image: ollama/ollama:latest
+    logging: *log
+    restart: unless-stopped
+    volumes:
+      - ollama_data:/root/.ollama
+
   api:
     build:
       context: ../..
       dockerfile: deploy/vps/Dockerfile.api
+    logging: *log
     restart: unless-stopped
     environment:
       DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-itledger}
       # Caddy serves the SPA and /api from one origin, so CORS is not exercised
       # by the app. Kept for direct API calls while troubleshooting.
       CORS_ORIGINS: ${PUBLIC_ORIGIN:-http://localhost}
-      # Master switch for everything that reaches a model. Off is the deployed
-      # state — see be/.env.example.
-      AI_ENABLED: "0"
+      # Master switch for everything be/llm.py reaches (chat, tool-calling,
+      # rerank). ON now that ollama (above) is a real local chat server — only
+      # used here by the /documents/ask server-side fallback. The retired Ask
+      # AI router (be/routers/assistant.py) stays unmounted regardless.
+      AI_ENABLED: "1"
+      LLM_BASE_URL: http://ollama:11434/v1
+      # Settled on 7b over 3b after trying both for real. 3b was faster
+      # (~50-60s/answer vs ~106s here) and always answered in the question's
+      # own language, but its prose was sometimes terse/off (one answer was
+      # just the source filename). 7b's content is noticeably better and it
+      # follows "use the fleet stats verbatim" well enough to skip needless
+      # tool calls on count questions (a few seconds instead of a full tool
+      # round-trip) — traded off against occasionally answering in English to
+      # a Vietnamese question, and staying slow on anything needing a long
+      # generated answer. Revisit if that language slip turns out to bite.
+      LLM_MODEL: qwen2.5:7b
+      # be/embeddings.py — independent of AI_ENABLED, see that module.
+      EMBED_BASE_URL: http://ollama:11434
+      EMBED_MODEL: bge-m3
+      # Single shared admin login (be/auth.py) — added after a Strix pentest
+      # found every endpoint open with no auth at all. Secrets, so they come
+      # from deploy/vps/.env like POSTGRES_PASSWORD above, not literals here.
+      ADMIN_USERNAME: ${ADMIN_USERNAME:-admin}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:?set ADMIN_PASSWORD in deploy/vps/.env}
+      SECRET_KEY: ${SECRET_KEY:?set SECRET_KEY in deploy/vps/.env}
     # Loopback only: Caddy on the host is what puts this on the internet.
     ports:
       - "127.0.0.1:8000:8000"
     depends_on:
       db:
         condition: service_healthy
+      ollama:
+        condition: service_started
 
 volumes:
   pgdata:
+  ollama_data:

@@ -1,3 +1,10 @@
+# Xoay vòng log cho MỌI service. Không có nó thì `json-file` mặc định tăng VÔ
+# HẠN: đo trên chính máy này, log của một container đã đạt 2,25 GB trong một
+# tệp duy nhất. `docker system df` KHÔNG đếm log container nên nó vô hình.
+x-log: &log
+  driver: json-file
+  options: {max-size: "50m", max-file: "3"}
+
 # Production overlay for the office-LAN deployment. Layered ON TOP of
 # docker-compose.yml (which stays the dev file), and run from INSIDE the WSL2
 # distro that hosts the Docker daemon:
