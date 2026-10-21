@@ -180,12 +180,23 @@ export function ImportModal({
   // Detect one file at a time. Firing them all at once at a model that answers in
   // seconds gets the whole batch queued behind each other anyway, and a row that
   // says it is working while nothing is happening is a lie.
+  //
+  // The in-flight guard lives in a ref, not in `queue` state: the `patch` call that
+  // marks a file "detecting" is itself a queue change, and this effect depends on
+  // `queue` (to notice files added later). A `let cancelled` flag torn down by the
+  // effect's own cleanup would fire on that very re-render — cancelling the request
+  // it had just started — so every progress event and the final result would be
+  // silently dropped while the request kept running (and succeeding) on the server.
+  // That looked exactly like a hang: stuck on "opening the file" forever, 200 OK
+  // in the server logs.
+  const detectingIdRef = useRef<string | null>(null);
   useEffect(() => {
     if (kind !== "auto") return;
+    if (detectingIdRef.current) return;
     const next = queue.find((f) => f.status === "waiting");
-    if (!next || queue.some((f) => f.status === "detecting")) return;
+    if (!next) return;
 
-    let cancelled = false;
+    detectingIdRef.current = next.id;
     (async () => {
       patch(next.id, { status: "detecting", progress: undefined });
       try {
@@ -194,9 +205,8 @@ export function ImportModal({
           ? { sheet_text: await fileToSheetText(next.file) }
           : { attachment: await fileToAttachment(next.file) };
         const result = await detectImportKindStreaming(source, (progress) => {
-          if (!cancelled) patch(next.id, { progress });
+          patch(next.id, { progress });
         });
-        if (cancelled) return;
         patch(next.id, {
           kind: result.kind === "unknown" ? null : (result.kind as ImportKind),
           reason: result.reason,
@@ -206,7 +216,6 @@ export function ImportModal({
           progress: undefined,
         });
       } catch (e) {
-        if (cancelled) return;
         patch(next.id, {
           status: "error",
           progress: undefined,
@@ -214,11 +223,10 @@ export function ImportModal({
             text: e instanceof ApiError ? e.message : t("iq.err.detect"),
           },
         });
+      } finally {
+        detectingIdRef.current = null;
       }
     })();
-    return () => {
-      cancelled = true;
-    };
   }, [queue, kind, t]);
 
   const detecting = queue.some(
@@ -484,7 +492,15 @@ export function ImportModal({
                     outcome: undefined,
                   })
                 }
-                onRemove={() => setQueue((q) => q.filter((x) => x.id !== f.id))}
+                onRemove={() => {
+                  // The one detecting now is still running server-side and will
+                  // patch(f.id, ...) into thin air (a no-op) when it finishes — fine,
+                  // except the ref would stay pointed at a file that no longer
+                  // exists, wedging every later file behind a detection nothing is
+                  // waiting on.
+                  if (detectingIdRef.current === f.id) detectingIdRef.current = null;
+                  setQueue((q) => q.filter((x) => x.id !== f.id));
+                }}
               />
             ))}
           </div>

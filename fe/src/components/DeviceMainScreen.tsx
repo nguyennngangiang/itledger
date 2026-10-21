@@ -25,6 +25,7 @@ import {
   InfoIcon,
 } from "./icons";
 import { formatDate, resolveOwner, toUserMap } from "../lib/format";
+import { Device3D } from "./Device3D";
 import { usePagedList } from "../lib/usePagedList";
 import { useTableSelection } from "../lib/useTableSelection";
 import { TABLE_SCROLL } from "../lib/table";
@@ -230,9 +231,18 @@ export const DeviceMainScreen = ({
           <div className="flex items-center gap-1">
             <Popover
               title={label}
-              content={specBubble(d)}
+              content={
+                <div className="device-peek">
+                  <Device3D device={d} />
+                  {specBubble(d)}
+                </div>
+              }
               trigger={["hover", "focus"]}
               placement="left"
+              // time to move the pointer from the "i" onto the model and drag it
+              mouseLeaveDelay={0.3}
+              // closing unmounts Device3D, which frees the WebGL context
+              destroyOnHidden
             >
               <span
                 className="info-trigger"

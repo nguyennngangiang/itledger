@@ -19,6 +19,10 @@ import { MaintenanceScreen } from "./components/MaintenanceScreen";
 import { HandoverScreen } from "./components/HandoverScreen";
 import { EmployeeScreen } from "./components/EmployeeScreen";
 import { NotificationScreen } from "./components/NotificationScreen";
+import { AskAiScreen } from "./components/AskAiScreen";
+import { ScanScreen } from "./components/ScanScreen";
+import { LoginScreen } from "./components/LoginScreen";
+import { getToken, clearToken, UNAUTHORIZED_EVENT } from "./lib/authToken";
 import { ImportModal } from "./components/Modal/ImportModal";
 import type { ImportKind } from "./components/Modal/ImportModal";
 import { countOpenIssues } from "./api/imports";
@@ -32,15 +36,23 @@ import {
   WrenchIcon,
   HandoverIcon,
   UserIcon,
+  SparklesIcon,
+  CameraIcon,
   LogoMark,
   PlusIcon,
   BellIcon,
   GlobeIcon,
   UploadIcon,
   ChevronDownIcon,
+  LogoutIcon,
 } from "./components/icons";
 import { useT } from "./i18n/useT";
+import { toast } from "react-toastify";
+import { lastScanWasKilled, reportKilledScan } from "./lib/scanHealth";
+import { ensureFresh } from "./lib/freshness";
 import type { Key } from "./i18n/catalog";
+
+const PHONE = typeof window !== "undefined" && window.matchMedia("(pointer: coarse)").matches;
 
 type Page =
   | "dashboard"
@@ -48,6 +60,8 @@ type Page =
   | "maintenance"
   | "handover"
   | "employee"
+  | "scan"
+  | "askAi"
   | "notifications";
 export type QuickAdd = "device" | "maintenance" | "handover" | "employee";
 
@@ -60,6 +74,7 @@ const NAV: { key: Page; label: Key; icon: React.ReactNode }[] = [
   { key: "maintenance", label: "nav.maintenance", icon: <WrenchIcon size={17} /> },
   { key: "handover", label: "nav.handover", icon: <HandoverIcon size={17} /> },
   { key: "employee", label: "nav.employee", icon: <UserIcon size={17} /> },
+  { key: "askAi", label: "nav.askAi", icon: <SparklesIcon size={17} /> },
 ];
 
 const QUICK_ADD: { key: QuickAdd; label: Key }[] = [
@@ -69,16 +84,26 @@ const QUICK_ADD: { key: QuickAdd; label: Key }[] = [
   { key: "employee", label: "quickAdd.employee" },
 ];
 
-// What the Import dropdown offers. Clicking the button itself (rather than a menu
-// item) opens the same modal with no kind chosen, and it detects the file instead.
-const IMPORT_KINDS: { key: ImportKind; label: Key }[] = [
-  { key: "device_list", label: "importKind.device_list" },
-  { key: "maintenance_list", label: "importKind.maintenance_list" },
-  { key: "handover_minutes", label: "importKind.handover_minutes" },
-];
 
 function App() {
-  const [page, setPage] = useState<Page>("dashboard");
+  // No token -> LoginScreen instead of the app shell (see the early return
+  // below). api/client.ts fires UNAUTHORIZED_EVENT on any 401 (no token, or
+  // one that expired/was invalidated), so a session dying mid-use drops back
+  // here too, not just a cold load with nothing stored.
+  const [authed, setAuthed] = useState(() => !!getToken());
+  useEffect(() => {
+    const onUnauthorized = () => setAuthed(false);
+    window.addEventListener(UNAUTHORIZED_EVENT, onUnauthorized);
+    return () => window.removeEventListener(UNAUTHORIZED_EVENT, onUnauthorized);
+  }, []);
+
+  // A phone is here to scan: open straight onto the camera instead of a
+  // dashboard of charts sized for a desk.
+  // …unless the last visit's scan was killed by the browser moments after it
+  // started: walking straight back into it is how a crash becomes a loop.
+  const [page, setPage] = useState<Page>(() =>
+    window.matchMedia("(pointer: coarse) and (max-width: 760px)").matches && !lastScanWasKilled() ? "scan" : "dashboard",
+  );
   const [createModal, setCreateModal] = useState<QuickAdd | null>(null);
   const [refresh, setRefresh] = useState({
     device: 0,
@@ -88,12 +113,19 @@ function App() {
   });
   const { loading } = useLoading();
 
+  // On a phone, fetch the OCR models while nothing else is happening, so the
+  // Scan camera starts reading text instead of starting an 18 MB download.
+  useEffect(() => {
+    if (!authed || !window.matchMedia("(pointer: coarse)").matches) return;
+    const idle = window.requestIdleCallback ?? ((cb: () => void) => window.setTimeout(cb, 2000));
+    idle(() => import("./lib/ocr").then((m) => m.prefetchOcr()));
+  }, [authed]);
+
   // Open import issues, for the nav badge. Refetched whenever a page switch or an
   // import could have changed the count — there is no push channel, and polling a
   // LAN app every few seconds would be noise for a number that changes by hand.
   // null = closed. "auto" lets the importer detect the file's kind.
   const [importKind, setImportKind] = useState<ImportKind | "auto" | null>(null);
-  const [importMenu, setImportMenu] = useState(false);
 
   // Files dragged onto the window, handed to the importer. `at` is the trigger, not
   // the array: dropping a second batch onto the already-open dialog has to append,
@@ -114,7 +146,7 @@ function App() {
       .then((r) => setOpenIssues(r.open))
       .catch(() => {}); // a badge is not worth an error toast
   }, []);
-  useEffect(refreshIssueCount, [refreshIssueCount, page, refresh.handover]);
+  useEffect(refreshIssueCount, [refreshIssueCount, page, refresh.handover, authed]);
 
   const navRef = useRef<HTMLElement>(null);
   const indicatorRef = useRef<HTMLSpanElement>(null);
@@ -162,13 +194,43 @@ function App() {
   };
 
   const { t, toggle, scrambled } = useT();
+  // Opening Scan is the moment an old build would hurt (camera + OCR), so
+  // check for a newer one right then too.
+  useEffect(() => {
+    if (page === "scan") ensureFresh();
+  }, [page]);
+  useEffect(() => {
+    if (lastScanWasKilled()) toast.warning(t("scan.killed.notice"), { autoClose: 6000 });
+    // Report it from here: after a crash the app no longer opens on Scan, so
+    // waiting for the Scan screen to mount would lose the report.
+    reportKilledScan();
+    // once, on load
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   // `page` is a closed union, so these concatenated keys are always real ones.
   const title = t(`page.${page}.title` as Key);
   const subtitle = t(`page.${page}.subtitle` as Key);
 
+  if (!authed) {
+    // Every hook above still runs (React's rule: no conditional hooks) —
+    // harmless while logged out. countOpenIssues just fails silently
+    // (refreshIssueCount already swallows its own errors) until `authed`
+    // flips true and that effect re-fires.
+    return (
+      <>
+        {!PHONE && <SparkleBackground />}
+        <LoginScreen onSuccess={() => setAuthed(true)} />
+      </>
+    );
+  }
+
   return (
     <>
-      <SparkleBackground />
+      {/* The three.js sparkle field is a full-screen WebGL animation. On a phone
+          it competes with the camera and the on-device OCR for the same GPU
+          and memory — measured: it is most of a desktop dashboard's 570 MB —
+          so phones and the Scan screen go without it. */}
+      {!PHONE && page !== "scan" && <SparkleBackground />}
 
       {loading && (
         <div className="app-loading-overlay">
@@ -179,7 +241,7 @@ function App() {
         </div>
       )}
 
-      <div className="app-shell">
+      <div className={`app-shell${page === "scan" ? " page-scan" : ""}`}>
         <header className="topbar">
           {/* The brand IS the Dashboard link — it used to be a sixth tab. */}
           <button
@@ -212,6 +274,16 @@ function App() {
           </nav>
 
           <div className="topbar-actions">
+            {/* The Scan tab is easy to miss among five; this is the obvious door. */}
+            <button
+              className={`topbar-btn topbar-btn--scan${page === "scan" ? " active" : ""}`}
+              onClick={() => setPage("scan")}
+              title={t("header.scanTitle")}
+            >
+              <CameraIcon size={16} />
+              <span>{t("header.scan")}</span>
+            </button>
+
             {/* Four separate add buttons collapsed into one menu. Hover opens it
                 for the mouse; click opens it too, because hover alone is not
                 reachable by keyboard or on a touch screen. */}
@@ -229,47 +301,11 @@ function App() {
               </button>
             </Dropdown>
 
-            {/* Split control: the label imports a file and lets the server work
-                out what it is; the caret picks the kind explicitly. Hover opens
-                the menu, and the caret is a real button so keyboard and touch
-                can reach it — which a hover-only menu cannot. */}
-            <Dropdown
-              trigger={["hover"]}
-              open={importMenu}
-              onOpenChange={setImportMenu}
-              menu={{
-                items: IMPORT_KINDS.map((k) => ({ key: k.key, label: t(k.label) })),
-                onClick: ({ key }) => {
-                  setImportMenu(false);
-                  setImportKind(key as ImportKind);
-                },
-              }}
-            >
-              <span className="topbar-split">
-                <button
-                  className="topbar-btn topbar-btn--main"
-                  onClick={() => setImportKind("auto")}
-                  title={t("header.importTitle")}
-                >
-                  <UploadIcon size={15} />
-                  <span>{t("header.import")}</span>
-                </button>
-                <button
-                  className="topbar-btn topbar-btn--caret"
-                  aria-haspopup="menu"
-                  aria-expanded={importMenu}
-                  aria-label={t("header.importKindAria")}
-                  onClick={() => setImportMenu((v) => !v)}
-                >
-                  <ChevronDownIcon size={14} />
-                </button>
-              </span>
-            </Dropdown>
 
             {/* Shuffles every string into a different language, one per string.
                 Press again for English. */}
             <button
-              className={`topbar-globe${scrambled ? " on" : ""}`}
+              className={`topbar-globe topbar-scramble${scrambled ? " on" : ""}`}
               onClick={toggle}
               aria-pressed={scrambled}
               aria-label={t(scrambled ? "header.scramble.off" : "header.scramble.on")}
@@ -294,6 +330,18 @@ function App() {
                 <span className="topbar-bell-badge">{openIssues}</span>
               )}
             </button>
+
+            <button
+              className="topbar-globe"
+              onClick={() => {
+                clearToken();
+                setAuthed(false);
+              }}
+              aria-label={t("header.logout")}
+              title={t("header.logout")}
+            >
+              <LogoutIcon size={16} />
+            </button>
           </div>
         </header>
 
@@ -304,7 +352,9 @@ function App() {
 
         <main
           className={
-            "app-content" + (page === "dashboard" ? "" : " app-content--flex")
+            // Dashboard, Scan and Notifications scroll as a page; the table screens pin
+            // their pagination instead.
+            "app-content" + (page === "dashboard" || page === "scan" || page === "notifications" ? "" : " app-content--flex")
           }
         >
           {page === "dashboard" && <Dashboard refreshKey={refresh.device} />}
@@ -332,6 +382,16 @@ function App() {
               onAdd={() => openCreate("employee")}
             />
           )}
+          {page === "scan" && (
+            <ScanScreen
+              onSaved={() => setRefresh((r) => ({ ...r, device: r.device + 1 }))}
+              // Excel/CSV picked on the Scan screen goes to the same importer a
+              // dropped file does — the header Import button is gone, Scan is
+              // the one door for files now.
+              onSpreadsheets={takeDroppedFiles}
+            />
+          )}
+          {page === "askAi" && <AskAiScreen />}
           {page === "notifications" && (
             <NotificationScreen
               refreshKey={refresh.handover}

@@ -183,10 +183,33 @@ export const SparklesIcon = (p: IconProps) => (
   </Base>
 );
 
+export const FileTextIcon = (p: IconProps) => (
+  <Base {...p}>
+    <path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8Z" />
+    <path d="M14 3v5h5" />
+    <path d="M9 13h6M9 17h6" />
+  </Base>
+);
+
+export const LogoutIcon = (p: IconProps) => (
+  <Base {...p}>
+    <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
+    <path d="M16 17l5-5-5-5" />
+    <path d="M21 12H9" />
+  </Base>
+);
+
 export const LogoMark = (p: IconProps) => (
   <Base {...p} strokeWidth={1.9}>
     <path d="M4 7l8-4 8 4-8 4-8-4Z" />
     <path d="M4 12l8 4 8-4" />
     <path d="M4 17l8 4 8-4" />
+  </Base>
+);
+
+export const CameraIcon = (p: IconProps) => (
+  <Base {...p}>
+    <path d="M14.5 4h-5L8 6H5a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-3l-1.5-2Z" />
+    <circle cx="12" cy="13" r="3.5" />
   </Base>
 );

@@ -1,7 +1,14 @@
 // Single place that owns the API base URL, JSON handling, and error shape.
 // Every resource module (devices.ts, users.ts, ...) goes through request().
+import { getToken, notifyUnauthorized } from '../lib/authToken'
 
 const BASE_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:8000'
+
+// Every request except POST /auth/login carries this if we have one (be/auth.py).
+function authHeaders(): Record<string, string> {
+  const token = getToken()
+  return token ? { Authorization: `Bearer ${token}` } : {}
+}
 
 export class ApiError extends Error {
   status: number
@@ -37,9 +44,16 @@ function describeDetail(detail: unknown, fallback: string): string {
 
 export async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   const res = await fetch(`${BASE_URL}${path}`, {
-    headers: { 'Content-Type': 'application/json', ...options.headers },
+    headers: { 'Content-Type': 'application/json', ...authHeaders(), ...options.headers },
     ...options,
   })
+
+  if (res.status === 401) {
+    // No token, or the session expired/was invalidated server-side — drop
+    // back to the login screen (App.tsx listens for this) rather than
+    // surfacing a raw "unauthorized" toast on whatever the user was doing.
+    notifyUnauthorized()
+  }
 
   if (!res.ok) {
     // FastAPI puts the message under `detail`.
@@ -71,9 +85,10 @@ export async function* streamRequest<T>(
 ): AsyncGenerator<T> {
   const res = await fetch(`${BASE_URL}${path}`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...options.headers },
+    headers: { 'Content-Type': 'application/json', ...authHeaders(), ...options.headers },
     ...options,
   })
+  if (res.status === 401) notifyUnauthorized()
   if (!res.ok) {
     const body = await res.json().catch(() => ({}))
     throw new ApiError(res.status, describeDetail(body.detail, res.statusText))

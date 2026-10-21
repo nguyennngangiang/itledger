@@ -17,12 +17,12 @@
   --surface: #ffffff; /* cards, tables, modals */
   --surface-muted: #f7f5fd; /* subtle fills, table headers */
   --topbar-bg: #eceafb; /* light pastel top bar (replaces navy) */
-  --topbar-active: linear-gradient(135deg, #8b83f0, #7c74e8);
+  --topbar-active: linear-gradient(135deg, var(--accent-solid), var(--accent-ink)); /* white text: 4.7–6.0:1 */
 
   /* Text */
   --text: #2b2740; /* deep indigo-slate primary text */
   --text-muted: #6b6785; /* muted secondary text */
-  --text-faint: #a5a1bb; /* hints */
+  --text-faint: #726d8a; /* hints — was #a5a1bb (2.6:1 on white); this is 4.9:1 */
   --text-on-dark: #2b2740; /* top bar now light → dark text */
   --text-on-dark-muted: #6b6785;
 
@@ -43,6 +43,40 @@
   --warning-bg: #fef3c7;
   --danger: #dc2626;
   --danger-bg: #fee2e2;
+
+  /* Contrast-safe accent steps. White on --accent (#7c74e8) is only 3.8:1 —
+     not enough for 14px text — so solid buttons use --accent-solid (4.7:1) and
+     accent-coloured text on light ground uses --accent-ink (6.0:1). --accent
+     stays for borders, tints and hover. */
+  --accent-solid: #6b63dd;
+  --accent-ink: #5b52c9;
+  --trough: #f0eefb; /* segmented-control groove */
+
+  /* Meaning, in three steps each. Text uses the -ink step: the older
+     --success (3.3:1) and --warning (3.0:1) are for dots, borders and fills only. */
+  --ok-ink: #0a7d38;
+  --ok-bg: #e7f4ec;
+  --ok-border: #bfe0cb;
+  --warn-ink: #b35900;
+  --warn-bg: #fdf3e4;
+  --warn-border: #edd0a6;
+  --warn-deep: #6b3d05; /* text on --warn-bg */
+  --danger-ink: #dc2626;
+  --danger-tint: #fdeaea;
+  --danger-line: #f2c0c0;
+  --danger-deep: #8f1a1a; /* text on --danger-tint */
+
+  /* Camera surfaces: the feed and the glass floating over it, purple-leaning
+     like --text rather than the cold blue-black they replace. */
+  --feed: #15121f;
+  --glass: #181426a8;
+  --glass-line: #ffffff21;
+  --scrim: #0d0a1680;
+  --on-glass: #ffffff;
+
+  /* Where a minutes-form value came from (MinutesScan.tsx). */
+  --src-claude-bg: #f6f1fd;
+  --src-claude-line: #cdb7f2;
 
   /* Shape */
   --radius-sm: 8px;

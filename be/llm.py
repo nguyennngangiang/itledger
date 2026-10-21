@@ -168,6 +168,7 @@ async def chat_agent(
     max_steps: int = 6,
     temperature: float = 0.2,
     timeout: float = 240,
+    on_step=None,
 ) -> AgentResult:
     """Agentic chat. The model may call `tools` — each executed via
     `await dispatch(name, args)` which returns a text result — across up to
@@ -178,7 +179,14 @@ async def chat_agent(
     Grounding baseline lives in `system`, so this degrades gracefully: if the
     server ignores tool-calling (returns content on the first turn) we still get a
     grounded answer, and if it rejects the `tools` param outright (HTTP 400) we
-    retry toolless. Raises HTTPException(503) only when the LLM is unreachable."""
+    retry toolless. Raises HTTPException(503) only when the LLM is unreachable.
+
+    `on_step(name)`, if given, fires the moment each tool call is dispatched —
+    this call has no streaming of its own (unlike `_chat_stream`), and a
+    multi-round tool loop on a CPU-only host can run for a while between one
+    piece of visible progress and the next, so a caller wanting to report
+    progress (be/routers/documents.py's SSE stream) needs a hook mid-loop, not
+    just the final answer."""
     start = time.monotonic()
     called: list[str] = []
     convo: list[dict] = [{"role": "system", "content": system}, *messages]
@@ -219,13 +227,16 @@ async def chat_agent(
             convo.append(msg)  # the assistant turn that requested the tool calls
             for call in requested_calls:
                 fn = call.get("function", {})
-                called.append(fn.get("name", ""))
+                name = fn.get("name", "")
+                called.append(name)
+                if on_step:
+                    on_step(name)
                 try:
                     args = json.loads(fn.get("arguments") or "{}")
                 except json.JSONDecodeError:
                     args = {}
                 try:
-                    result = await dispatch(fn.get("name", ""), args)
+                    result = await dispatch(name, args)
                 except Exception as e:  # noqa: BLE001 — a tool failure is data for the model
                     result = f"error: {e}"
                 convo.append({

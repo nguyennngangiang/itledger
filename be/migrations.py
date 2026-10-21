@@ -33,8 +33,10 @@ Add pg_advisory_xact_lock the day that changes.
 """
 import asyncpg
 
+from .repositories.document import DOCUMENTS_DDL
 from .repositories.feedback import FEEDBACK_DDL
 from .repositories.import_issues import IMPORT_ISSUES_DDL
+from .repositories.scan import SCAN_DDL
 from .repositories.user import GHOST_DDL, USER_MIGRATIONS_DDL
 
 MIGRATIONS: list[tuple[str, str]] = [
@@ -42,6 +44,8 @@ MIGRATIONS: list[tuple[str, str]] = [
     ("0002_import_issues", IMPORT_ISSUES_DDL),
     ("0003_user_columns", USER_MIGRATIONS_DDL),
     ("0004_ghost_user", GHOST_DDL),
+    ("0005_documents", DOCUMENTS_DDL),
+    ("0006_scan_examples", SCAN_DDL),
 ]
 
 

@@ -135,6 +135,20 @@ def _ai_on(monkeypatch):
     monkeypatch.setattr(settings, "ai_enabled", True)
 
 
+def _ai_off(monkeypatch):
+    """Force the model paths off for one test, regardless of the environment.
+
+    `settings.ai_enabled` used to be FALSE in every deployment, so the "AI off"
+    tests below relied on that default rather than arranging it — the point was
+    that a real flip would break them audibly. It has now flipped: this VPS's
+    AI_ENABLED=1 (deploy/vps/docker-compose.vps.yml), because the document RAG
+    feature's server-side fallback (be/routers/documents.py `/ask`) needs
+    be/llm.py reachable. These tests still need the off-path exercised, so they
+    now arrange it explicitly instead of assuming it.
+    """
+    monkeypatch.setattr(settings, "ai_enabled", False)
+
+
 def _fake_llm(monkeypatch, reading: dict):
     """Make the LLM answer with a canned reading — no model is contacted.
 
@@ -794,13 +808,15 @@ async def test_warm_never_fails_the_caller(client, monkeypatch):
     assert r.json() == {"warm": False}
 
 
-# ------------------------------------------------ with AI switched off (default)
+# ------------------------------------------------------------ with AI switched off
 #
-# settings.ai_enabled is FALSE in the deployed configuration: the local model
-# server was retired. These are the cases that matter day to day, so they say what
-# happens rather than leaving it to be inferred from the guarded branches above.
-# Note none of them touch monkeypatch — the default IS off, and a test that had to
-# arrange that would stop noticing if the default flipped back.
+# settings.ai_enabled is now TRUE in the deployed configuration (the document RAG
+# feature's server-side fallback needs be/llm.py reachable — see
+# deploy/vps/docker-compose.vps.yml), but the off-path guards below are still real
+# code (a model server that is down should fail exactly like AI being off) and
+# still worth testing explicitly. Each one now arranges it with _ai_off rather than
+# relying on the environment default, which is what let this section go stale
+# silently the last time the default changed.
 
 
 async def test_template_sheet_still_reads_with_no_model_at_all(client):
@@ -813,9 +829,12 @@ async def test_template_sheet_still_reads_with_no_model_at_all(client):
     assert body["parsed"]["items"][0]["serial"] == "5CD03347TB"
 
 
-async def test_off_template_text_is_refused_as_off_template_not_as_an_outage(client):
+async def test_off_template_text_is_refused_as_off_template_not_as_an_outage(
+    client, monkeypatch
+):
     """Prose used to fall through to the model. With no model the honest answer is
     about the FILE — telling someone the AI is down invites them to retry forever."""
+    _ai_off(monkeypatch)
     prose = (
         "BIÊN BẢN BÀN GIAO ngày 2026-07-21. Bên A Trịnh Thế Hưng VPHN228. "
         "Bên B Bùi Thị Thanh VPHN349. HP laptop 5CD03347TB."
@@ -827,10 +846,13 @@ async def test_off_template_text_is_refused_as_off_template_not_as_an_outage(cli
     assert "mẫu" in r.json()["detail"]
 
 
-async def test_forcing_the_model_falls_back_to_the_parser_instead_of_failing(client):
+async def test_forcing_the_model_falls_back_to_the_parser_instead_of_failing(
+    client, monkeypatch
+):
     """A stale SPA can still send reader="llm". Honouring it would skip the only
     reader that works and then report the file as off-template, which is a lie about
     a file that reads fine."""
+    _ai_off(monkeypatch)
     r = await client.post(
         "/imports/handover/read",
         json={"sheet_text": SHEET_ONE_ITEM, "reader": "llm"},
@@ -841,6 +863,7 @@ async def test_forcing_the_model_falls_back_to_the_parser_instead_of_failing(cli
 
 async def test_detect_settles_on_the_heuristics_without_a_model(client, monkeypatch):
     """The unsure branch used to ask the model. It must not now try and hang."""
+    _ai_off(monkeypatch)
     async def _boom(*a, **k):  # noqa: ANN002
         raise AssertionError("no model should be contacted while AI is off")
     monkeypatch.setattr(llm, "_chat", _boom)
@@ -855,6 +878,7 @@ async def test_detect_settles_on_the_heuristics_without_a_model(client, monkeypa
 async def test_warm_answers_without_reaching_for_a_model(client, monkeypatch):
     """Kept as a 200 rather than deleted so a cached SPA build gets an answer, not a
     404 in its console."""
+    _ai_off(monkeypatch)
     async def _boom():
         raise AssertionError("warm must not contact a model while AI is off")
     monkeypatch.setattr(llm, "warm", _boom)
@@ -865,15 +889,17 @@ async def test_warm_answers_without_reaching_for_a_model(client, monkeypatch):
 
 
 async def test_extracting_a_pdf_says_what_still_works(client):
-    """A PDF has no reader without OCR. The message names the Excel template rather
-    than a service the user has never heard of."""
+    """Native PDF text is read locally now (be/extract.py), independent of
+    ai_enabled — no model or remote service involved. This payload is too
+    broken to have any extractable text, so it is refused as a bad upload
+    rather than crashing or blaming a service that no longer exists."""
     r = await client.post(
         "/imports/handover/read",
         json={"attachment": {"name": "scan.pdf", "mime": "application/pdf",
                              "data": "JVBERi0xLjQK"}},
     )
-    assert r.status_code == 503
-    assert "Excel" in r.json()["detail"]
+    assert r.status_code == 422
+    assert "PDF" in r.json()["detail"]
 
 
 # ------------------------------------------------------------------- /plan

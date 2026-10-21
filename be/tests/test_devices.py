@@ -388,3 +388,34 @@ class TestTheGhostIsBootstrapped:
         )
         assert r.status_code == 409, r.text
         assert GHOST in r.json()["detail"]
+
+
+async def test_semantic_search_ranks_devices_by_meaning(client, seed, monkeypatch):
+    """Was 503 unconditionally (be/search.py called a retired NPU service) —
+    now backed by be/embeddings.py, same fake-embedder technique as
+    test_search.py."""
+    import hashlib
+
+    from be import embeddings
+
+    def _fake_embed_one(text: str) -> list[float]:
+        vec = [0.0] * 64
+        for word in text.lower().split():
+            idx = int(hashlib.md5(word.encode()).hexdigest(), 16) % 64
+            vec[idx] += 1.0
+        norm = sum(v * v for v in vec) ** 0.5
+        return [v / norm for v in vec] if norm else vec
+
+    async def embed(text: str) -> list[float]:
+        return _fake_embed_one(text)
+
+    async def embed_many(texts: list[str]) -> list[list[float]]:
+        return [_fake_embed_one(t) for t in texts]
+
+    monkeypatch.setattr(embeddings, "embed", embed)
+    monkeypatch.setattr(embeddings, "embed_many", embed_many)
+
+    r = await client.get("/devices/semantic-search", params={"q": "Asus Ryzen"})
+    assert r.status_code == 200, r.text
+    results = r.json()
+    assert results[0]["serial_number"] == "SN-QUAN-1"

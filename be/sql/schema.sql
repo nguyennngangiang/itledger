@@ -107,3 +107,29 @@ CREATE TABLE IF NOT EXISTS import_issues (
 );
 CREATE INDEX IF NOT EXISTS idx_import_issues_open
     ON import_issues (status, created_at DESC);
+
+-- Document RAG library: files uploaded once, chunked and embedded (bge-m3, via
+-- Ollama) at upload time, kept for repeated Q&A instead of re-reading per
+-- question. See be/repositories/document.py DOCUMENTS_DDL. Also created at
+-- app startup for already-running databases.
+CREATE EXTENSION IF NOT EXISTS vector;
+
+CREATE TABLE IF NOT EXISTS documents (
+    id BIGSERIAL PRIMARY KEY,
+    title VARCHAR(255) NOT NULL,
+    filename VARCHAR(255) NOT NULL,
+    mime VARCHAR(100),
+    uploaded_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    char_count INT NOT NULL DEFAULT 0,
+    status VARCHAR(16) NOT NULL DEFAULT 'ready'
+);
+
+CREATE TABLE IF NOT EXISTS document_chunks (
+    id BIGSERIAL PRIMARY KEY,
+    document_id BIGINT NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
+    chunk_index INT NOT NULL,
+    chunk_text TEXT NOT NULL,
+    embedding vector(1024) NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_document_chunks_embedding
+    ON document_chunks USING hnsw (embedding vector_cosine_ops);

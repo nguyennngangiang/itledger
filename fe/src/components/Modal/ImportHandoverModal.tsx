@@ -103,6 +103,8 @@ export function ImportHandoverModal({
   sourceText,
   embedded = false,
   queueLabel,
+  initialParsed,
+  initialName,
 }: {
   onClose: () => void;
   onDone?: (result?: ApplyResult) => void;
@@ -115,6 +117,10 @@ export function ImportHandoverModal({
   embedded?: boolean;
   /** e.g. "File 2/5" — shown next to the step bar when part of a bulk run. */
   queueLabel?: string;
+  /** A record already read and corrected elsewhere (the Scan screen's minutes
+   * form): skips picking and reading, and opens on the plan. */
+  initialParsed?: ParsedMinutes;
+  initialName?: string;
 }) {
   const { t } = useT();
   const store = t("hi.owner.store");
@@ -207,12 +213,12 @@ export function ImportHandoverModal({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [file, sourceText]);
 
-  const reconcile = async () => {
-    if (!parsed) return;
+  const reconcile = async (record = parsed, name = fileName) => {
+    if (!record) return;
     setError(null);
     setBusy(t("hi.busy.reconcile"));
     try {
-      setPlan(await planHandoverImport(parsed, fileName));
+      setPlan(await planHandoverImport(record, name));
       setStep("plan");
     } catch (e) {
       setError(e instanceof ApiError ? e.message : t("hi.err.reconcile"));
@@ -220,6 +226,16 @@ export function ImportHandoverModal({
       setBusy(null);
     }
   };
+
+  useEffect(() => {
+    if (!initialParsed) return;
+    // Same reasoning as the file effect below: the record arriving IS the event.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setParsed(initialParsed);
+    setFileName(initialName ?? null);
+    reconcile(initialParsed, initialName ?? null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialParsed]);
 
   const flowOf = (item: ItemPlan): Flow | "skip" =>
     flowOverride[rowKey(item)] ?? item.flow;
@@ -783,7 +799,7 @@ export function ImportHandoverModal({
             </Button>
             <Button
               type="primary"
-              onClick={reconcile}
+              onClick={() => reconcile()}
               disabled={!parsed.items.length || !!busy}
             >
               {t("hi.action.reconcile")}

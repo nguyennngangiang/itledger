@@ -1,5 +1,6 @@
 import { useEffect, useRef } from "react";
 import * as THREE from "three";
+import { reduceMotion, weakMachine } from "../lib/perf";
 
 // Pastel sparkle palette (matches the app's periwinkle / mint / pink / sky / amber).
 const PALETTE = [
@@ -69,14 +70,15 @@ export function SparkleBackground() {
     );
     camera.position.z = 26;
 
-    const reduceMotion = window.matchMedia(
-      "(prefers-reduced-motion: reduce)",
-    ).matches;
+    const still = reduceMotion();
     // Cap DPR at 1.5 — a full-screen additive-blended particle field at 2× is a
     // lot of fill for an integrated GPU and barely looks different.
-    const PR = Math.min(window.devicePixelRatio, 1.5);
+    // Cost is per pixel per frame: a full-screen canvas at 1.5× on a 4K
+    // display is ~19M pixels, sixty-plus times a second. 1× is plenty for
+    // soft glowing dots, and antialiasing round point sprites buys nothing.
+    const PR = 1;
 
-    const renderer = new THREE.WebGLRenderer({ alpha: true, antialias: true });
+    const renderer = new THREE.WebGLRenderer({ alpha: true, antialias: false, powerPreference: "low-power" });
     renderer.setPixelRatio(PR);
     renderer.setSize(window.innerWidth, window.innerHeight);
     renderer.setClearColor(0x000000, 0);
@@ -84,7 +86,7 @@ export function SparkleBackground() {
 
     // --- build the particle field ---
     // 350 reads as dense enough full-screen; 900 was needless overdraw.
-    const COUNT = 350;
+    const COUNT = 160;
     const positions = new Float32Array(COUNT * 3);
     const colors = new Float32Array(COUNT * 3);
     const scales = new Float32Array(COUNT);
@@ -173,39 +175,53 @@ export function SparkleBackground() {
 
     const start = performance.now();
     let raf = 0;
-    const tick = () => {
-      const t = (performance.now() - start) / 1000;
+    let lastDraw = 0;
+    // 30 fps is ample for a slow twinkle; rendering at the display's rate
+    // (60–144 Hz) doubled-to-quadrupled the GPU work for nothing visible.
+    const FRAME_MS = 1000 / 30;
+    const tick = (now: number = performance.now()) => {
+      raf = requestAnimationFrame(tick);
+      if (now - lastDraw < FRAME_MS) return;
+      lastDraw = now;
+      const t = (now - start) / 1000;
       material.uniforms.uTime.value = t;
-      points.rotation.y += 0.0008;
-      points.rotation.x += 0.0003;
+      points.rotation.y += 0.0016;
+      points.rotation.x += 0.0006;
       // ease camera toward pointer for depth parallax
-      camera.position.x += (target.x * 3 - camera.position.x) * 0.03;
-      camera.position.y += (-target.y * 2 - camera.position.y) * 0.03;
+      camera.position.x += (target.x * 3 - camera.position.x) * 0.06;
+      camera.position.y += (-target.y * 2 - camera.position.y) * 0.06;
       camera.lookAt(scene.position);
       renderer.render(scene, camera);
-      raf = requestAnimationFrame(tick);
     };
 
-    // Stop the loop entirely when the tab is hidden — no point burning GPU/CPU
-    // on a canvas nobody can see. And with reduced-motion, draw one static frame.
-    const onVisibility = () => {
-      if (document.hidden) {
+    // Stop the loop entirely when nobody is looking: tab hidden, or the
+    // window not focused (another app in front) — a decoration has no
+    // business keeping a laptop's GPU busy in the background.
+    const running = () => !document.hidden && document.hasFocus();
+    const sync = () => {
+      if (running() && !raf) raf = requestAnimationFrame(tick);
+      else if (!running() && raf) {
         cancelAnimationFrame(raf);
         raf = 0;
-      } else if (!raf) {
-        raf = requestAnimationFrame(tick);
       }
     };
-    if (reduceMotion) {
+    // Weak machines get one still frame: the dots stay, the animation goes.
+    const weak = weakMachine();
+    const onVisibility = sync;
+    if (still || weak) {
       renderer.render(scene, camera);
     } else {
-      tick();
+      sync();
       document.addEventListener("visibilitychange", onVisibility);
+      window.addEventListener("focus", onVisibility);
+      window.addEventListener("blur", onVisibility);
     }
 
     return () => {
       cancelAnimationFrame(raf);
       document.removeEventListener("visibilitychange", onVisibility);
+      window.removeEventListener("focus", onVisibility);
+      window.removeEventListener("blur", onVisibility);
       window.removeEventListener("pointermove", onPointer);
       window.removeEventListener("resize", onResize);
       geo.dispose();
