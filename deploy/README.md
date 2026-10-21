@@ -1,5 +1,29 @@
 # LAN deployment
 
+> **RETIRED 2026-09-04.** The app moved to a Linux VPS and serves from there. On this
+> machine everything is stopped: Caddy is not running, both containers are removed, the
+> `Ubuntu-24.04` distro is terminated, and `ITLedger-AutoStart` is **disabled** — so
+> nothing here comes back on its own, at logon or on the 5-minute watchdog.
+>
+> **Nothing was deleted.** The `itledger_pgdata` volume still holds the ledger
+> (246 users / 342 devices / 333 handovers / 34 repairs), `backups/` holds two verified
+> dumps from the last day it ran, and `fe/dist`, `deploy/caddy.exe` and `be/.env` are
+> untouched. To bring it all back:
+>
+> ```powershell
+> Enable-ScheduledTask -TaskName 'ITLedger-AutoStart'
+> Start-ScheduledTask  -TaskName 'ITLedger-AutoStart'
+> ```
+>
+> `start-itledger.ps1` is idempotent, so that one run restores the keepalive, the
+> containers and Caddy. Everything below describes the deployment as it ran, and is kept
+> for that reason — read it as history, not as instructions. One correction it earns:
+> the distro has `systemd=true`, so `dockerd` keeps it alive on its own and the WSL
+> keepalive in step 1 is not the only thing holding it up. Terminating the distro takes
+> `wsl --terminate Ubuntu-24.04`.
+>
+> For the move itself, see [`vps/README.md`](vps/README.md) and [`vps/LLM.md`](vps/LLM.md).
+
 Serves IT Ledger to the office network at **http://192.168.3.252:10000**, and brings
 the whole stack back after someone logs in following a reboot.
 
