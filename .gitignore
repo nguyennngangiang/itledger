@@ -41,3 +41,20 @@ deploy/caddy.exe
 # Database dumps taken for the VPS move (deploy/vps/dump-db.sh). They hold real
 # employee names and codes, and are carried to the server out of band, never here.
 backups/
+
+# On-device OCR for the Scan screen: models + onnxruntime-web runtime, fetched
+# and checksum-verified by fe/scripts/fetch-ocr-models.mjs (npm prebuild).
+fe/public/ocr/
+
+# Bản build cũ giữ lại khi đổi sang Vite 8 (82 MB). fe/dist đã bị bỏ qua ở trên;
+# thư mục .old này cũng là sản phẩm build, không phải mã nguồn.
+fe/dist.old/
+
+# Kết quả quét Strix (deploy/vps/docker-compose.strix-test.yml). Chứa đường dẫn,
+# cổng và chi tiết hạ tầng của bản chạy thử — repo này công khai, không đẩy lên.
+strix_runs/
+
+# Skill của Strix tải về theo skills-lock.json, không phải mã của dự án.
+.agents/
+.claude/
+skills-lock.json
