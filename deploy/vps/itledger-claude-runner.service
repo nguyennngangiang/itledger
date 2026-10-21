@@ -1,0 +1,24 @@
+# Host-side `claude -p` for the Scan screen — see deploy/vps/claude-runner.py.
+# Install:  sudo cp deploy/vps/itledger-claude-runner.service /etc/systemd/system/
+#           sudo systemctl daemon-reload && sudo systemctl enable --now itledger-claude-runner
+# Runs as ubuntu because that is the account `claude` is logged in under.
+[Unit]
+Description=IT Ledger — claude -p runner for the Scan screen
+After=network-online.target
+
+[Service]
+User=ubuntu
+Group=ubuntu
+Environment=HOME=/home/ubuntu
+Environment=PATH=/home/ubuntu/.local/bin:/usr/local/bin:/usr/bin:/bin
+ExecStart=/usr/bin/python3 /srv/itledger/deploy/vps/claude-runner.py
+# The API container bind-mounts this directory; keep it across restarts so the
+# mount never points at a deleted directory.
+RuntimeDirectory=itledger-claude
+RuntimeDirectoryMode=0750
+RuntimeDirectoryPreserve=yes
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target

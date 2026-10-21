@@ -107,7 +107,17 @@ services:
       ADMIN_USERNAME: ${ADMIN_USERNAME:-admin}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:?set ADMIN_PASSWORD in deploy/vps/.env}
       SECRET_KEY: ${SECRET_KEY:?set SECRET_KEY in deploy/vps/.env}
+      # Scan screen (be/scan.py): Claude reads paperwork via `claude -p` on the
+      # HOST, under the host's logged-in Claude account — no API key. The runner
+      # (deploy/vps/claude-runner.py, systemd unit itledger-claude-runner)
+      # listens on a unix socket in the directory mounted below.
+      CLAUDE_RUNNER_SOCKET: /run/itledger-claude/claude.sock
+      SCAN_MODEL: ${SCAN_MODEL:-claude-opus-5-5}
     # Loopback only: Caddy on the host is what puts this on the internet.
+    # The directory, not the socket file: the runner recreates the socket on
+    # every restart, and a file bind-mount would keep pointing at the old one.
+    volumes:
+      - /run/itledger-claude:/run/itledger-claude
     ports:
       - "127.0.0.1:8000:8000"
     depends_on:

@@ -1,0 +1,85 @@
+# Isolated copy of IT Ledger for Strix (usestrix/strix) to pentest against —
+# NEVER point Strix at the production stack (docker-compose.vps.yml). Strix
+# actively exploits (SQLi payloads, auth-bypass attempts, business-logic
+# abuse), not passive scanning, so this runs on its own DB (fresh schema,
+# synthetic data via `python -m be.seed` — no real employee data) and its own
+# network. Only Ollama is shared with the live stack (itledger_default,
+# external below) — it holds no data of its own, just model weights, so
+# reusing it costs nothing in exposure and saves re-pulling ~6GB of models.
+#
+# Bring up + seed:
+#   docker compose -f deploy/vps/docker-compose.strix-test.yml up -d --build
+#   docker compose -f deploy/vps/docker-compose.strix-test.yml exec api python -m be.seed
+# Target for strix: http://127.0.0.1:8081
+# Tear down when done (drops the isolated volume too):
+#   docker compose -f deploy/vps/docker-compose.strix-test.yml down -v
+name: itledger-strixtest
+
+services:
+  db:
+    image: pgvector/pgvector:pg16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: strixtest_local_only
+      POSTGRES_DB: itledger
+    volumes:
+      - strixtest_pgdata:/var/lib/postgresql/data
+      - ../../be/sql/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
+    networks:
+      - internal
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d itledger"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  api:
+    build:
+      context: ../..
+      dockerfile: deploy/vps/Dockerfile.api
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql://postgres:strixtest_local_only@db:5432/itledger
+      CORS_ORIGINS: http://localhost:8081
+      AI_ENABLED: "1"
+      LLM_BASE_URL: http://ollama:11434/v1
+      LLM_MODEL: qwen2.5:7b
+      EMBED_BASE_URL: http://ollama:11434
+      EMBED_MODEL: bge-m3
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - internal
+      - shared
+
+  web:
+    image: nginx:alpine
+    restart: unless-stopped
+    volumes:
+      - ../../fe/dist:/usr/share/nginx/html:ro
+      - ./strix-test.nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    ports:
+      # Bound to the docker0 bridge gateway, not 127.0.0.1: Strix's own sandbox
+      # is a separate container reaching this over host.docker.internal (i.e.
+      # the docker0 bridge, 172.17.0.1) — a loopback-only bind is invisible to
+      # it. Binding this specific IP (not 0.0.0.0) keeps it unreachable from
+      # the public internet: only the host itself and other containers on the
+      # default bridge can reach 172.17.0.1.
+      - "172.17.0.1:8081:80"
+    depends_on:
+      - api
+    networks:
+      - internal
+
+networks:
+  internal: {}
+  # The live Ollama's network — joined only by `api`, only to reach Ollama.
+  # `db` never touches this network.
+  shared:
+    name: itledger_default
+    external: true
+
+volumes:
+  strixtest_pgdata:
