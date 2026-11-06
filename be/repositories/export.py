@@ -77,3 +77,44 @@ async def maintenance(pool: asyncpg.Pool, since: date | None = None) -> list:
 async def risky_codes(pool: asyncpg.Pool) -> list:
     """Ledger users who are not plain active — candidates for `user_not_synced`."""
     return await pool.fetch(RISKY_CODES_SQL, GHOST_CODE)
+
+
+# --- xuất toàn bộ sổ sang hệ thống khác ------------------------------------
+#
+# KHÁC hẳn ba truy vấn ở trên: chúng phục vụ GLPI và chỉ lấy hàng còn sống,
+# đúng những cột GLPI hiểu. Phần này là bản sao để DI CƯ, nên lấy MỌI cột và
+# MỌI hàng, kể cả hàng đã xoá mềm — bỏ thùng rác lại là làm mất lịch sử mà
+# người ta có thể cần khôi phục ở nhà mới.
+#
+# `document_chunks` CỐ Ý không có ở đây: mỗi hàng mang một vector 1024 chiều
+# chỉ có nghĩa với đúng mô hình nhúng đã sinh ra nó. Nhà mới nhúng lại từ
+# `documents` thì đúng hơn là bê theo vector cũ.
+MIGRATE_TABLES = (
+    "users", "devices", "handovers", "maintenance",
+    "import_issues", "search_feedback", "documents",
+)
+
+
+async def table_rows(pool: asyncpg.Pool, table: str) -> list:
+    """Mọi hàng, mọi cột của MỘT bảng trong danh sách trên.
+
+    Tên bảng không thể là tham số truy vấn, nên nó được đối chiếu với
+    `MIGRATE_TABLES` trước khi ghép vào câu lệnh — cùng cách `_crud.Table` làm
+    cho `ORDER BY`. Tên lạ thì ném, không phải lọc im lặng.
+    """
+    if table not in MIGRATE_TABLES:
+        raise ValueError(f"bảng không nằm trong danh sách xuất: {table!r}")
+    return await pool.fetch(f"SELECT * FROM {table}")
+
+
+async def table_counts(pool: asyncpg.Pool) -> dict:
+    """count(*) thật, KHÔNG phải ước lượng của pg_stat_user_tables.
+
+    deploy/vps/dump-db.sh đã vấp đúng chỗ này: pg_stat báo 1 thiết bị trên một
+    sổ có 334 cái, vì số liệu đó cũ cho tới khi ANALYZE chạy. Bên nhận đối
+    chiếu bằng con số này nên nó phải đếm thật.
+    """
+    out = {}
+    for t in MIGRATE_TABLES:
+        out[t] = await pool.fetchval(f"SELECT count(*) FROM {t}")
+    return out

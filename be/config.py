@@ -45,6 +45,19 @@ class Settings:
     embed_base_url: str = os.getenv("EMBED_BASE_URL", "http://ollama:11434")
     embed_model: str = os.getenv("EMBED_MODEL", "bge-m3")
 
+    # Cổng xuất dữ liệu TẠM THỜI — be/routers/export.py, GET /export/data.
+    # Để hệ thống mới tự kéo toàn bộ sổ sang thay vì bê tệp bằng tay.
+    #
+    # Ba thứ ở đây đều là chốt chặn, không phải tuỳ chọn:
+    #  * token rỗng  -> endpoint trả 404, coi như không tồn tại. Đây là mặc
+    #    định, nên quên bật cũng không hở.
+    #  * hạn rỗng    -> cũng 404. Một cổng "tạm" mà không có ngày hết là một
+    #    cổng vĩnh viễn, và không ai nhớ ra nó nữa.
+    #  * token < 32 ký tự -> 404. Cổng này nằm trên Internet và app đã bỏ đăng
+    #    nhập, nên nó là lớp bảo vệ DUY NHẤT của 258 hồ sơ nhân sự.
+    export_token: str = os.getenv("EXPORT_TOKEN", "").strip()
+    export_token_until: str = os.getenv("EXPORT_TOKEN_UNTIL", "").strip()
+
     # Claude reads supplier paperwork and device labels for the Scan screen
     # (be/scan.py) through `claude -p` on the HOST — deploy/vps/claude-runner.py,
     # reached over this unix socket (bind-mounted into the container). It uses

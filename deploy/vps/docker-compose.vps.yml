@@ -101,6 +101,10 @@ services:
       # be/embeddings.py — independent of AI_ENABLED, see that module.
       EMBED_BASE_URL: http://ollama:11434
       EMBED_MODEL: bge-m3
+      # Cổng xuất dữ liệu tạm thời. Không đặt thì endpoint 404 — xem
+      # be/routers/export.py. Để trống mặc định là CÓ CHỦ Ý.
+      EXPORT_TOKEN: ${EXPORT_TOKEN:-}
+      EXPORT_TOKEN_UNTIL: ${EXPORT_TOKEN_UNTIL:-}
       # Scan screen (be/scan.py): Claude reads paperwork via `claude -p` on the
       # HOST, under the host's logged-in Claude account — no API key. The runner
       # (deploy/vps/claude-runner.py, systemd unit itledger-claude-runner)
