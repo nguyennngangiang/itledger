@@ -11,7 +11,7 @@ from .repositories.errors import (
     ProtectedError,
 )
 from .routers import (
-    devices, documents, feedback, handovers, imports, maintenance, scan, users,
+    devices, documents, export, feedback, handovers, imports, maintenance, scan, users,
 )
 
 @asynccontextmanager
@@ -71,6 +71,7 @@ app.include_router(feedback.router)
 app.include_router(imports.router)
 app.include_router(documents.router)
 app.include_router(scan.router)
+app.include_router(export.router)
 
 # routers/assistant.py is deliberately NOT mounted. It is the Ask AI feature, and
 # the LLM stack it talked to has been retired, so /assistant/* answers 404 rather
