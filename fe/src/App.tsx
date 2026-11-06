@@ -21,8 +21,6 @@ import { EmployeeScreen } from "./components/EmployeeScreen";
 import { NotificationScreen } from "./components/NotificationScreen";
 import { AskAiScreen } from "./components/AskAiScreen";
 import { ScanScreen } from "./components/ScanScreen";
-import { LoginScreen } from "./components/LoginScreen";
-import { getToken, clearToken, UNAUTHORIZED_EVENT } from "./lib/authToken";
 import { ImportModal } from "./components/Modal/ImportModal";
 import type { ImportKind } from "./components/Modal/ImportModal";
 import { countOpenIssues } from "./api/imports";
@@ -44,7 +42,6 @@ import {
   GlobeIcon,
   UploadIcon,
   ChevronDownIcon,
-  LogoutIcon,
 } from "./components/icons";
 import { useT } from "./i18n/useT";
 import { toast } from "react-toastify";
@@ -86,17 +83,6 @@ const QUICK_ADD: { key: QuickAdd; label: Key }[] = [
 
 
 function App() {
-  // No token -> LoginScreen instead of the app shell (see the early return
-  // below). api/client.ts fires UNAUTHORIZED_EVENT on any 401 (no token, or
-  // one that expired/was invalidated), so a session dying mid-use drops back
-  // here too, not just a cold load with nothing stored.
-  const [authed, setAuthed] = useState(() => !!getToken());
-  useEffect(() => {
-    const onUnauthorized = () => setAuthed(false);
-    window.addEventListener(UNAUTHORIZED_EVENT, onUnauthorized);
-    return () => window.removeEventListener(UNAUTHORIZED_EVENT, onUnauthorized);
-  }, []);
-
   // A phone is here to scan: open straight onto the camera instead of a
   // dashboard of charts sized for a desk.
   // …unless the last visit's scan was killed by the browser moments after it
@@ -116,10 +102,10 @@ function App() {
   // On a phone, fetch the OCR models while nothing else is happening, so the
   // Scan camera starts reading text instead of starting an 18 MB download.
   useEffect(() => {
-    if (!authed || !window.matchMedia("(pointer: coarse)").matches) return;
+    if (!window.matchMedia("(pointer: coarse)").matches) return;
     const idle = window.requestIdleCallback ?? ((cb: () => void) => window.setTimeout(cb, 2000));
     idle(() => import("./lib/ocr").then((m) => m.prefetchOcr()));
-  }, [authed]);
+  }, []);
 
   // Open import issues, for the nav badge. Refetched whenever a page switch or an
   // import could have changed the count — there is no push channel, and polling a
@@ -146,7 +132,7 @@ function App() {
       .then((r) => setOpenIssues(r.open))
       .catch(() => {}); // a badge is not worth an error toast
   }, []);
-  useEffect(refreshIssueCount, [refreshIssueCount, page, refresh.handover, authed]);
+  useEffect(refreshIssueCount, [refreshIssueCount, page, refresh.handover]);
 
   const navRef = useRef<HTMLElement>(null);
   const indicatorRef = useRef<HTMLSpanElement>(null);
@@ -210,19 +196,6 @@ function App() {
   // `page` is a closed union, so these concatenated keys are always real ones.
   const title = t(`page.${page}.title` as Key);
   const subtitle = t(`page.${page}.subtitle` as Key);
-
-  if (!authed) {
-    // Every hook above still runs (React's rule: no conditional hooks) —
-    // harmless while logged out. countOpenIssues just fails silently
-    // (refreshIssueCount already swallows its own errors) until `authed`
-    // flips true and that effect re-fires.
-    return (
-      <>
-        {!PHONE && <SparkleBackground />}
-        <LoginScreen onSuccess={() => setAuthed(true)} />
-      </>
-    );
-  }
 
   return (
     <>
@@ -329,18 +302,6 @@ function App() {
               {openIssues > 0 && (
                 <span className="topbar-bell-badge">{openIssues}</span>
               )}
-            </button>
-
-            <button
-              className="topbar-globe"
-              onClick={() => {
-                clearToken();
-                setAuthed(false);
-              }}
-              aria-label={t("header.logout")}
-              title={t("header.logout")}
-            >
-              <LogoutIcon size={16} />
             </button>
           </div>
         </header>

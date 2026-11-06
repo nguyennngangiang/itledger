@@ -1,8 +1,8 @@
 from contextlib import asynccontextmanager
-from fastapi import Depends, FastAPI, Request, Response, status
+from fastapi import FastAPI, Request, Response, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from . import auth, db, migrations
+from . import db, migrations
 from .config import settings
 from .repositories.errors import (
     DuplicateError,
@@ -10,8 +10,9 @@ from .repositories.errors import (
     InUseError,
     ProtectedError,
 )
-from .routers import auth as auth_router
-from .routers import devices, documents, feedback, handovers, imports, maintenance, scan, users
+from .routers import (
+    devices, documents, feedback, handovers, imports, maintenance, scan, users,
+)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -54,22 +55,22 @@ async def _conflict(request: Request, exc: Exception) -> JSONResponse:
 for _domain_error in (DuplicateError, ForeignKeyError, InUseError, ProtectedError):
     app.add_exception_handler(_domain_error, _conflict)
 
-# Login is the one thing that has to work before a token exists.
-app.include_router(auth_router.router)
-
-# Everything else needs a valid session — one dependency, added here rather
-# than router-by-router, so a new router can never ship un-protected by
-# forgetting to add it locally. See be/auth.py for what a Strix pentest found
-# without this (strix_runs/172-17-0-1-8081_bc07).
-_authed = [Depends(auth.require_auth)]
-app.include_router(devices.router, dependencies=_authed)
-app.include_router(handovers.router, dependencies=_authed)
-app.include_router(maintenance.router, dependencies=_authed)
-app.include_router(users.router, dependencies=_authed)
-app.include_router(feedback.router, dependencies=_authed)
-app.include_router(imports.router, dependencies=_authed)
-app.include_router(documents.router, dependencies=_authed)
-app.include_router(scan.router, dependencies=_authed)
+# No authentication. The shared-admin login that used to sit in front of every
+# router was removed on 2026-11-04 at the owner's request: the API is published
+# only on 127.0.0.1:8000 behind the site proxy, and the one shared password it
+# checked was a speed bump for the IT team rather than a boundary between
+# people. If this app is ever exposed beyond the host, the login has to come
+# back first — be/auth.py and be/routers/auth.py are in the history, and the
+# Strix run that found every endpoint open without them is in
+# strix_runs/172-17-0-1-8081_bc07.
+app.include_router(devices.router)
+app.include_router(handovers.router)
+app.include_router(maintenance.router)
+app.include_router(users.router)
+app.include_router(feedback.router)
+app.include_router(imports.router)
+app.include_router(documents.router)
+app.include_router(scan.router)
 
 # routers/assistant.py is deliberately NOT mounted. It is the Ask AI feature, and
 # the LLM stack it talked to has been retired, so /assistant/* answers 404 rather

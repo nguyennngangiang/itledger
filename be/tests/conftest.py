@@ -20,7 +20,7 @@ import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 
-from be import auth, db, migrations
+from be import db, migrations
 from be.config import settings
 from be.main import app
 
@@ -85,12 +85,7 @@ def database() -> str:
 async def pool(database: str):
     """A clean database per test, wired into the app two ways: the `get_pool`
     dependency (routers) and `db._pool` (things that call db.get_pool() directly,
-    e.g. /healthz).
-
-    Also bypasses `auth.require_auth` — these tests are about what each
-    router does, not about the login layer, which get its own coverage in
-    test_auth.py (popping this override for the one test that needs the real
-    401 behaviour back)."""
+    e.g. /healthz)."""
     p = await asyncpg.create_pool(dsn=database, min_size=1, max_size=4)
     # The same call the lifespan makes, so the test database is provisioned
     # exactly the way production is: fresh schema.sql, then migrations.
@@ -99,7 +94,6 @@ async def pool(database: str):
 
     db._pool = p
     app.dependency_overrides[db.get_pool] = lambda: p
-    app.dependency_overrides[auth.require_auth] = lambda: None
     try:
         yield p
     finally:

@@ -191,14 +191,6 @@ export const FileTextIcon = (p: IconProps) => (
   </Base>
 );
 
-export const LogoutIcon = (p: IconProps) => (
-  <Base {...p}>
-    <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
-    <path d="M16 17l5-5-5-5" />
-    <path d="M21 12H9" />
-  </Base>
-);
-
 export const LogoMark = (p: IconProps) => (
   <Base {...p} strokeWidth={1.9}>
     <path d="M4 7l8-4 8 4-8 4-8-4Z" />

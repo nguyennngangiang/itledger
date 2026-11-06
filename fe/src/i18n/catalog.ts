@@ -52,7 +52,6 @@ export const EN = {
   "header.bell.some": "Notifications — {n} to deal with",
   "header.scramble.on": "Shuffle the languages",
   "header.scramble.off": "Back to English",
-  "header.logout": "Log out",
 
   "quickAdd.device": "Device",
   "quickAdd.maintenance": "Maintenance",
@@ -598,15 +597,6 @@ export const EN = {
   "employeeForm.statusHint":
     "Retired keeps the person in the ledger — their handover history still reads, and any device they never returned stays visible. Use the trash only for a row entered by mistake.",
   "employeeForm.failed": "Failed to save employee",
-
-  // ---------------------------------------------------------------------- login
-  "login.subtitle": "Sign in to continue",
-  "login.username": "Username",
-  "login.password": "Password",
-  "login.submit": "Sign in",
-  // Deliberately the same message for a wrong username and a wrong password —
-  // see be/auth.py check_credentials.
-  "login.error": "Incorrect username or password.",
 
   // ------------------------------------------------------------------- Ask AI
   "askAi.library.title": "Library",

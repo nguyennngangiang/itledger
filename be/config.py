@@ -45,17 +45,6 @@ class Settings:
     embed_base_url: str = os.getenv("EMBED_BASE_URL", "http://ollama:11434")
     embed_model: str = os.getenv("EMBED_MODEL", "bge-m3")
 
-    # Single shared admin account — see be/auth.py. Added after a Strix
-    # pentest found every endpoint reachable and writable with no
-    # authentication at all (strix_runs/172-17-0-1-8081_bc07). There is no
-    # user table; this is one shared login, not per-person accounts.
-    admin_username: str = os.getenv("ADMIN_USERNAME", "admin")
-    admin_password: str = os.getenv("ADMIN_PASSWORD", "")
-    # Signs session tokens (be/auth.py). Blank means "not configured" —
-    # be/auth.py refuses to issue or accept tokens rather than sign with an
-    # empty key.
-    secret_key: str = os.getenv("SECRET_KEY", "")
-
     # Claude reads supplier paperwork and device labels for the Scan screen
     # (be/scan.py) through `claude -p` on the HOST — deploy/vps/claude-runner.py,
     # reached over this unix socket (bind-mounted into the container). It uses

@@ -1,7 +1,6 @@
 // The 404 page. The app has no router — every path is served index.html by the
 // web server (try_files) — so main.tsx renders this instead of <App/> for any
-// path that isn't the root. It sits outside the login gate on purpose: a wrong
-// link should say "wrong link", not "please sign in".
+// path that isn't the root.
 import { useEffect, useRef } from "react";
 import anime from "animejs";
 import gangImg from "../assets/404-gang.webp";

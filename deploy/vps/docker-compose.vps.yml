@@ -101,12 +101,6 @@ services:
       # be/embeddings.py — independent of AI_ENABLED, see that module.
       EMBED_BASE_URL: http://ollama:11434
       EMBED_MODEL: bge-m3
-      # Single shared admin login (be/auth.py) — added after a Strix pentest
-      # found every endpoint open with no auth at all. Secrets, so they come
-      # from deploy/vps/.env like POSTGRES_PASSWORD above, not literals here.
-      ADMIN_USERNAME: ${ADMIN_USERNAME:-admin}
-      ADMIN_PASSWORD: ${ADMIN_PASSWORD:?set ADMIN_PASSWORD in deploy/vps/.env}
-      SECRET_KEY: ${SECRET_KEY:?set SECRET_KEY in deploy/vps/.env}
       # Scan screen (be/scan.py): Claude reads paperwork via `claude -p` on the
       # HOST, under the host's logged-in Claude account — no API key. The runner
       # (deploy/vps/claude-runner.py, systemd unit itledger-claude-runner)
